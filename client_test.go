@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var defaultRetries = onfido.WithRetries(5, 5*time.Second)
+var defaultRetries = onfido.WithRetries(10, 5*time.Second)
 
 func setup(token string, opts ...onfido.ClientOption) (client *onfido.Client, teardown func(), err error) {
 	client, err = onfido.NewClient(token, opts...)
