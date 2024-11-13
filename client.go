@@ -169,7 +169,7 @@ const (
 )
 
 type PageDetails struct {
-	Total     int
+	Total     *int
 	Limit     *int
 	FirstPage *int
 	LastPage  *int
@@ -184,9 +184,10 @@ func (PaginationOption) isListApplicantOption() {}
 func (PaginationOption) isListWorkflowRunOption() {}
 
 type paginationOption struct {
-	Page    int `json:"page"`
-	PerPage int `json:"per_page"`
+	Page int `json:"page"`
 }
+
+func (paginationOption) isPaginationOption() {}
 
 func WithPage(page int) PaginationOption {
 	return func(p *paginationOption) {
@@ -194,20 +195,40 @@ func WithPage(page int) PaginationOption {
 	}
 }
 
-func WithPageLimit(limit int) PaginationOption {
-	return func(p *paginationOption) {
-		p.PerPage = limit
+type LimitPaginationOption func(*limitPaginationOption)
+
+func (LimitPaginationOption) isListApplicantOption() {}
+
+type limitPaginationOption struct {
+	PerPage int `json:"per_page"`
+}
+
+func (limitPaginationOption) isPaginationOption() {}
+
+func WithPageLimit(limit int) LimitPaginationOption {
+	return func(l *limitPaginationOption) {
+		l.PerPage = limit
 	}
 }
 
-func (c Client) getPaginationOptions(options *paginationOption) (params map[string]string) {
+type isPaginationOption interface {
+	isPaginationOption()
+}
+
+func (c Client) getPaginationOptions(opts ...isPaginationOption) (params map[string]string) {
 	params = make(map[string]string)
 
-	if options.Page != 0 {
-		params["page"] = fmt.Sprintf("%d", options.Page)
-	}
-	if options.PerPage != 0 {
-		params["per_page"] = fmt.Sprintf("%d", options.PerPage)
+	for _, opt := range opts {
+		switch opt := opt.(type) {
+		case paginationOption:
+			if opt.Page != 0 {
+				params["page"] = fmt.Sprintf("%d", opt.Page)
+			}
+		case limitPaginationOption:
+			if opt.PerPage != 0 {
+				params["per_page"] = fmt.Sprintf("%d", opt.PerPage)
+			}
+		}
 	}
 
 	return
@@ -217,7 +238,9 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 	pageResponse := PageDetails{}
 
 	total, _ := strconv.Atoi(headers.Get("X-Total-Count"))
-	pageResponse.Total = total
+	if total != 0 {
+		pageResponse.Total = &total
+	}
 
 	links := strings.Split(headers.Get("Link"), ",")
 	for _, link := range links {
@@ -239,6 +262,10 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 			main = splittedMain[0]
 		}
 
+		if per_page != 0 {
+			pageResponse.Limit = &per_page
+		}
+
 		// extract the page number
 		splittedMain := strings.Split(main, "page=")
 		if len(splittedMain) != 2 {
@@ -246,19 +273,17 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 		}
 		page, _ = strconv.Atoi(splittedMain[1])
 
-		switch rel {
-		case "first":
-			pageResponse.FirstPage = &page
-			pageResponse.Limit = &per_page
-		case "last":
-			pageResponse.LastPage = &page
-			pageResponse.Limit = &per_page
-		case "next":
-			pageResponse.NextPage = &page
-			pageResponse.Limit = &per_page
-		case "prev":
-			pageResponse.PrevPage = &page
-			pageResponse.Limit = &per_page
+		if page != 0 {
+			switch rel {
+			case "first":
+				pageResponse.FirstPage = &page
+			case "last":
+				pageResponse.LastPage = &page
+			case "next":
+				pageResponse.NextPage = &page
+			case "prev":
+				pageResponse.PrevPage = &page
+			}
 		}
 
 	}

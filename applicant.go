@@ -84,8 +84,9 @@ type ListApplicantsOption func(*listApplicantsOptions)
 func (ListApplicantsOption) isListApplicantOption() {}
 
 type listApplicantsOptions struct {
-	*paginationOption `json:",inline"`
-	IncludeDeleted    bool `json:"include_deleted,omitempty"`
+	*paginationOption      `json:",inline"`
+	*limitPaginationOption `json:",inline"`
+	IncludeDeleted         bool `json:"include_deleted,omitempty"`
 }
 
 func WithIncludeDeletedApplicants() ListApplicantsOption {
@@ -243,18 +244,25 @@ func (c *Client) RestoreApplicant(ctx context.Context, applicantId string) error
 }
 
 func (c Client) getListApplicantParams(opts ...IsListApplicantOption) (params map[string]string) {
-	options := &listApplicantsOptions{paginationOption: &paginationOption{}}
+	pg, lm := paginationOption{}, limitPaginationOption{}
+
+	options := &listApplicantsOptions{
+		paginationOption:      &pg,
+		limitPaginationOption: &lm,
+	}
 
 	for _, opt := range opts {
 		switch opt := opt.(type) {
 		case ListApplicantsOption:
 			opt(options)
 		case PaginationOption:
-			opt(options.paginationOption)
+			opt(&pg)
+		case LimitPaginationOption:
+			opt(&lm)
 		}
 	}
 
-	params = c.getPaginationOptions(options.paginationOption)
+	params = c.getPaginationOptions(pg, lm)
 
 	if options.IncludeDeleted {
 		params["include_deleted"] = "true"

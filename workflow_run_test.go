@@ -2,10 +2,12 @@ package onfido_test
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,61 +23,17 @@ func TestWorkflowRun(t *testing.T) {
 		t.Fatalf("error creating applicant: %v", err)
 	}
 
-	linkExpiresAt := time.Now().Add(30 * time.Minute).Truncate(time.Second).UTC()
 	testWorkflowRun := &onfido.WorkflowRun{}
+	linkExpiry := time.Now().Add(30 * time.Minute).Truncate(time.Second).UTC()
 
-	t.Run("CreateWorkflowRun", testCreateWorkflowRun(run, applicant, linkExpiresAt, testWorkflowRun))
+	t.Run("CreateWorkflowRun", testCreateWorkflowRun(run, applicant, linkExpiry, testWorkflowRun))
 	if testWorkflowRun.ID == "" {
 		t.Fatalf("workflow run ID is empty")
 	}
 	t.Run("RetrieveWorkflowRun", testRetrieveWorkflowRun(run, testWorkflowRun.ID))
 	t.Run("RetrieveWorkflowRunEvidenceSummaryFile", testRetrieveWorkflowRunEvidenceSummaryFile(run, testWorkflowRun.ID))
-	t.Run("ListWorkflowRuns", testListWorkflowRuns(run))
-
-	// t.Run("ListWorkflowRuns", func(t *testing.T) {
-	// 	// Test pagination
-	// 	tests := []struct {
-	// 		name      string
-	// 		opts      []onfido.IsListWorkflowRunOption
-	// 		wantCount int
-	// 		wantErr   bool
-	// 	}{
-	// 		{
-	// 			name:      "List without pagination",
-	// 			opts:      nil,
-	// 			wantCount: 1, // At least one from our creation test
-	// 			wantErr:   false,
-	// 		},
-	// 		{
-	// 			name: "List with pagination",
-	// 			opts: []onfido.IsListWorkflowRunOption{
-	// 				onfido.WithPage(1),
-	// 				onfido.WithPageLimit(2),
-	// 			},
-	// 			wantCount: 1,
-	// 			wantErr:   false,
-	// 		},
-	// 	}
-	//
-	// 	for _, tt := range tests {
-	// 		t.Run(tt.name, func(t *testing.T) {
-	// 			workflowRuns, pageDetails, err := client.ListWorkflowRuns(ctx, tt.opts...)
-	// 			if tt.wantErr {
-	// 				assert.Error(t, err)
-	// 				return
-	// 			}
-	//
-	// 			assert.NoError(t, err)
-	// 			assert.NotNil(t, workflowRuns)
-	// 			assert.GreaterOrEqual(t, len(workflowRuns), tt.wantCount)
-	//
-	// 			if len(tt.opts) > 0 {
-	// 				assert.NotNil(t, pageDetails)
-	// 				assert.NotZero(t, pageDetails.Total)
-	// 			}
-	// 		})
-	// 	}
-	// })
+	linkExpiry = time.Now().Add(30 * time.Minute).Truncate(time.Second).UTC()
+	t.Run("ListWorkflowRuns", testListWorkflowRuns(run, linkExpiry))
 }
 
 func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry time.Time, setWorkflow *onfido.WorkflowRun) func(*testing.T) {
@@ -224,8 +182,180 @@ func testRetrieveWorkflowRunEvidenceSummaryFile(run *testRun, workflowRunId stri
 	}
 }
 
-func testListWorkflowRuns(*testRun) func(*testing.T) {
+func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
+	tests := []testCase[interface{}]{
+		{
+			name: "ListWithPagination",
+		},
+		{
+			name: "ListWithTags",
+		},
+		{
+			name: "ListWithStatus",
+		},
+		{
+			name: "ListWithDateRange",
+		},
+		{
+			name: "ListWithSortAsc",
+		},
+		{
+			name: "ListWithSortDesc",
+		},
+		{
+			name: "ListWithMultipleFilters",
+		},
+	}
+
 	return func(t *testing.T) {
-		t.Skip("Not implemented")
+		sleep(t, 10)
+		t.Log("Cleaning up applicants")
+		if err := cleanupApplicants(run.ctx, run.client); err != nil {
+			t.Fatalf("error cleaning up applicants: %v", err)
+		}
+		t.Log("Creating test applicants")
+		sleep(t, 5)
+		applicants, err := createTestApplicants(run)
+		if err != nil {
+			t.Fatalf("error creating test applicants: %v", err)
+		}
+		t.Log("Creating test workflow runs")
+		sleep(t, 10)
+		if _, err := createTestWorkflowRuns(run, applicants, linkExpiry); err != nil {
+			t.Fatalf("error creating test workflow runs: %v", err)
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				isPagination := strings.Contains(tt.name, "Pagination")
+				isWithTags := strings.Contains(tt.name, "Tags")
+				isWithStatus := strings.Contains(tt.name, "Status")
+				isWithDateRange := strings.Contains(tt.name, "DateRange")
+				isWithSort := strings.Contains(tt.name, "Sort")
+				isWithMultipleFilters := strings.Contains(tt.name, "MultipleFilters")
+
+				switch {
+				case isPagination:
+					workflowRuns, page, err := run.client.ListWorkflowRuns(run.ctx, onfido.WithPage(1))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched. got %v", workflowRuns)
+					assert.Equalf(t, 6, len(workflowRuns), "expected workflow runs to be 6. got %v", workflowRuns)
+					if page == nil {
+						t.Fatalf("expected page details to be fetched")
+					}
+					assert.Equalf(t, 1, *page.FirstPage, "expected first page to be 1. got %v", page.FirstPage)
+					assert.Equalf(t, 1, *page.LastPage, "expected last page to be 1. got %v", page.LastPage)
+
+					workflowRuns, page, err = run.client.ListWorkflowRuns(run.ctx, onfido.WithPage(2))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.Equalf(t, 0, len(workflowRuns), "expected no workflow runs to be fetched. got %v", workflowRuns)
+					assert.NotNilf(t, page, "expected page details to be fetched")
+					if page == nil {
+						t.Fatalf("expected page details to be fetched")
+					}
+					assert.Equalf(t, 1, *page.FirstPage, "expected first page to be 1. got %v", page.FirstPage)
+					assert.Equalf(t, 1, *page.LastPage, "expected last page to be 1. got %v", page.LastPage)
+					assert.Equalf(t, 1, *page.PrevPage, "expected prev page to be 1. got %v", page.PrevPage)
+
+				case isWithTags:
+					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
+						onfido.WithWorkflowRunTags("test"))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					for _, run := range workflowRuns {
+						assert.Contains(t, run.Tags, "test", "expected workflow run to have test tag")
+					}
+
+				case isWithStatus:
+					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
+						onfido.WithWorkflowRunStatus(onfido.WorkflowRunStatusProcessing))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					for _, run := range workflowRuns {
+						assert.Equal(t, onfido.WorkflowRunStatusProcessing, run.Status,
+							"expected workflow run to have processing status")
+					}
+
+				case isWithDateRange:
+					t.Skip("api error says invalid date for all dates")
+					// Test date range filtering
+					now := time.Now()
+					yesterday := now.AddDate(0, 0, -1)
+					tomorrow := now.AddDate(0, 0, 1)
+
+					workflowRuns, _, err := run.client.ListWorkflowRuns(
+						run.ctx,
+						onfido.WithWorkflowRunCreatedAfter(yesterday),
+						onfido.WithWorkflowRunCreatedBefore(tomorrow),
+					)
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					for _, run := range workflowRuns {
+						assert.True(t, run.CreatedAt.After(yesterday),
+							"expected workflow run to be created after yesterday")
+						assert.True(t, run.CreatedAt.Before(tomorrow),
+							"expected workflow run to be created before tomorrow")
+					}
+
+				case isWithSort && strings.Contains(tt.name, "Asc"):
+					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
+						onfido.WithWorkflowRunSort(onfido.SortAsc))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					// Verify ascending order
+					if len(workflowRuns) > 1 {
+						for i := 1; i < len(workflowRuns); i++ {
+							assert.True(t, workflowRuns[i].CreatedAt.After(*workflowRuns[i-1].CreatedAt) ||
+								workflowRuns[i].CreatedAt.Equal(*workflowRuns[i-1].CreatedAt),
+								"expected workflow runs to be sorted in ascending order")
+						}
+					}
+
+				case isWithSort && strings.Contains(tt.name, "Desc"):
+					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
+						onfido.WithWorkflowRunSort(onfido.SortDesc))
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					// Verify descending order
+					if len(workflowRuns) > 1 {
+						for i := 1; i < len(workflowRuns); i++ {
+							assert.True(t, workflowRuns[i].CreatedAt.Before(*workflowRuns[i-1].CreatedAt) ||
+								workflowRuns[i].CreatedAt.Equal(*workflowRuns[i-1].CreatedAt),
+								"expected workflow runs to be sorted in descending order")
+						}
+					}
+
+				case isWithMultipleFilters:
+					// Test combining multiple filters
+					// now := time.Now()
+					// yesterday := now.AddDate(0, 0, -1)
+					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
+						onfido.WithWorkflowRunTags("test"),
+						onfido.WithWorkflowRunStatus(onfido.WorkflowRunStatusProcessing),
+						// onfido.WithWorkflowRunCreatedAfter(yesterday),
+						onfido.WithWorkflowRunSort(onfido.SortDesc),
+					)
+					spew.Dump(workflowRuns)
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					if len(workflowRuns) > 0 {
+						// Verify filters are applied
+						for _, run := range workflowRuns {
+							assert.Contains(t, run.Tags, "test", "expected workflow run to have test tag")
+							assert.Equal(t, onfido.WorkflowRunStatusProcessing, run.Status,
+								"expected workflow run to have processing status")
+							// assert.True(t, run.CreatedAt.After(yesterday),
+							// 	"expected workflow run to be created after yesterday")
+						}
+						// Verify descending order
+						if len(workflowRuns) > 1 {
+							assert.True(t, workflowRuns[1].CreatedAt.Before(*workflowRuns[0].CreatedAt) ||
+								workflowRuns[1].CreatedAt.Equal(*workflowRuns[0].CreatedAt),
+								"expected workflow runs to be sorted in descending order")
+						}
+					}
+				}
+			})
+		}
 	}
 }

@@ -1,7 +1,7 @@
 package onfido_test
 
 import (
-	"log"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -261,13 +261,6 @@ func testRestoreApplicant(run *testRun, applicantId string) func(*testing.T) {
 }
 
 func testListApplicants(run *testRun) func(*testing.T) {
-	if err := cleanupApplicants(run.ctx, run.client); err != nil {
-		log.Fatalf("error cleaning up applicants: %v", err)
-	}
-	if err := createTestApplicants(run); err != nil {
-		log.Fatalf("error creating test applicants: %v", err)
-	}
-
 	tests := []testCase[interface{}]{
 		{
 			name: "ListWithoutPagination",
@@ -284,6 +277,16 @@ func testListApplicants(run *testRun) func(*testing.T) {
 	}
 	return func(t *testing.T) {
 		sleep(t, 10)
+		t.Log("Cleaning up applicants")
+		if err := cleanupApplicants(run.ctx, run.client); err != nil {
+			t.Fatalf("error cleaning up applicants: %v", err)
+		}
+		t.Log("Creating test applicants")
+		sleep(t, 5)
+		if _, err := createTestApplicants(run); err != nil {
+			t.Fatalf("error creating test applicants: %v", err)
+		}
+
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				isPagination, isIncludeDeleted := strings.Contains(tt.name, "Pagination"), strings.Contains(tt.name, "IncludeDeleted")
@@ -303,10 +306,12 @@ func testListApplicants(run *testRun) func(*testing.T) {
 					if withLimit {
 						opts = append(opts, onfido.WithPageLimit(2))
 					}
+
+					fmt.Println(withLimit)
 					// First page
 					applicants, page, err := run.client.ListApplicants(run.ctx, opts...)
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
-					assertPaginationFirstPage(t, applicants, page, withLimit)
+					assertPaginationApplicantFirstPage(t, applicants, page, withLimit)
 
 					if withLimit {
 						// Second page
@@ -314,14 +319,14 @@ func testListApplicants(run *testRun) func(*testing.T) {
 							onfido.WithPage(*page.NextPage),
 							onfido.WithPageLimit(*page.Limit))
 						assert.NoErrorf(t, err, expectedNoError, tt.name, err)
-						assertPaginationSecondPage(t, applicants, page)
+						assertPaginationApplicantSecondPage(t, applicants, page)
 
 						// Last page
 						applicants, page, err = run.client.ListApplicants(run.ctx,
 							onfido.WithPage(*page.NextPage),
 							onfido.WithPageLimit(*page.Limit))
 						assert.NoErrorf(t, err, expectedNoError, tt.name, err)
-						assertPaginationLastPage(t, applicants, page)
+						assertPaginationApplicantLastPage(t, applicants, page)
 					}
 				case isIncludeDeleted:
 					// Cleanup applicants
@@ -347,4 +352,50 @@ func testListApplicants(run *testRun) func(*testing.T) {
 			})
 		}
 	}
+}
+
+func assertPaginationApplicantFirstPage[T any](t *testing.T, data []T, page *onfido.PageDetails, withLimit bool) {
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.Nilf(t, page.FirstPage, "expected first page to be nil. got %v", page.FirstPage)
+	assert.Nil(t, page.PrevPage, "expected prev page to be nil. got %v", page.PrevPage)
+	if withLimit {
+		assert.Equalf(t, 2, len(data), "expected data length to be 2. got %v", len(data))
+		assert.NotNil(t, page.Limit, "expected limit to be set")
+		assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+		assert.Equalf(t, 3, *page.LastPage, "expected last page to be 3. got %v", *page.LastPage)
+		assert.Equalf(t, 2, *page.NextPage, "expected next page to be 2. got %v", *page.NextPage)
+	} else {
+		assert.Equalf(t, 6, len(data), "expected data length to be 6. got %v", len(data))
+		assert.Nilf(t, page.Limit, "expected limit to be nil. got %v", page.Limit)
+		assert.Nilf(t, page.FirstPage, "expected first page to be nil. got %v", page.FirstPage)
+		assert.Nilf(t, page.LastPage, "expected last page to be nil. got %v", page.LastPage)
+		assert.Nilf(t, page.NextPage, "expected next page to be nil. got %v", page.NextPage)
+		assert.Nilf(t, page.PrevPage, "expected prev page to be nil. got %v", page.PrevPage)
+
+	}
+}
+
+func assertPaginationApplicantSecondPage[T any](t *testing.T, data []T, page *onfido.PageDetails) {
+	assert.Equalf(t, len(data), 2, "expected data length to be 2. got %v", len(data))
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.NotNil(t, page.Limit, "expected limit to be set")
+	assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+	assert.Equalf(t, 3, *page.LastPage, "expected last page to be 3. got %v", *page.LastPage)
+	assert.Equalf(t, 3, *page.NextPage, "expected next page to be 3. got %v", *page.NextPage)
+	assert.Equalf(t, 1, *page.FirstPage, "expected first page to be 1. got %v", *page.FirstPage)
+	assert.Equalf(t, 1, *page.PrevPage, "expected prev page to be 1. got %v", *page.PrevPage)
+}
+
+func assertPaginationApplicantLastPage[T any](t *testing.T, data []T, page *onfido.PageDetails) {
+	assert.Equalf(t, len(data), 2, "expected data length to be 2. got %v", len(data))
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.NotNil(t, page.Limit, "expected limit to be set")
+	assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+	assert.Nilf(t, page.LastPage, "expected last page to be nil. got %v", page.LastPage)
+	assert.Nilf(t, page.NextPage, "expected next page to be nil. got %v", page.NextPage)
+	assert.NotNilf(t, page.FirstPage, "expected first page to be set. got %v", page.FirstPage)
+	assert.NotNilf(t, page.PrevPage, "expected prev page to be set. got %v", page.PrevPage)
 }

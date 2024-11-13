@@ -3,9 +3,11 @@ package onfido
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk/internal/httpclient"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // ------------------------------------------------------------------
@@ -181,8 +183,12 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRun
 			return err
 		}
 
+		if err := c.getResponseOrError(resp, &workflowRuns); err != nil {
+			return err
+		}
+
 		pageDetails = c.extractPageDetails(resp.Headers)
-		return c.getResponseOrError(resp, &workflowRuns)
+		return nil
 	}
 
 	if err := c.do(ctx, req); err != nil {
@@ -225,18 +231,45 @@ func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, wor
 }
 
 func (c Client) getListWorkflowRunParams(opts ...IsListWorkflowRunOption) (params map[string]string) {
-	options := &listWorkflowRunOptions{paginationOption: &paginationOption{}}
+	pg := paginationOption{}
+	options := &listWorkflowRunOptions{
+		paginationOption: &pg,
+	}
 
 	for _, opt := range opts {
 		switch opt := opt.(type) {
 		case ListWorkflowRunOption:
 			opt(options)
 		case PaginationOption:
-			opt(options.paginationOption)
+			opt(&pg)
 		}
 	}
 
-	params = c.getPaginationOptions(options.paginationOption)
+	params = c.getPaginationOptions(pg)
+
+	if options.Status != "" {
+		params["status"] = string(options.Status)
+	}
+
+	if len(options.Tags) > 0 {
+		params["tags"] = strings.Join(options.Tags, ",")
+	}
+
+	if options.CreatedAfter != nil {
+		params["created_at_gt"] = options.CreatedAfter.Format("2006-01-02T15:04:05.999Z")
+	}
+
+	if options.CreatedBefore != nil {
+		params["created_at_lt"] = options.CreatedBefore.Format("2006-01-02T15:04:05.999Z")
+	}
+
+	if options.Sort != "" {
+		params["sort"] = string(options.Sort)
+	}
+
+	if options.CreatedAfter != nil || options.CreatedBefore != nil {
+		spew.Dump(params)
+	}
 
 	return
 }
