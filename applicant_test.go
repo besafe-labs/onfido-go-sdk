@@ -2,9 +2,9 @@ package onfido_test
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/besafe-labs/onfido-go-sdk"
@@ -12,340 +12,532 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCreateApplicant(t *testing.T) {
+const (
+	expectedError   = "expected error for %s. got %v"
+	expectedNoError = "expected no error for %s. got %v"
+	errorContains   = "expected error to have %s. got %v"
+)
+
+// testCase represents a generic test case structure for applicants
+type testCase[T any] struct {
+	name    string
+	input   T
+	setup   func(context.Context, *onfido.Client) (interface{}, error)
+	wantErr bool
+	errMsg  string
+}
+
+// testRun represents a generic test runner
+type testRun struct {
+	ctx      context.Context
+	client   *onfido.Client
+	teardown func()
+}
+
+// paginatedResponse represents a paginated test runner
+type paginatedResponse[T any] struct {
+	data []T
+	page *onfido.PageDetails
+}
+
+func setupTestRun(t *testing.T) *testRun {
 	utils.LoadEnv(".env")
 	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
 	if err != nil || client == nil {
 		t.Fatalf("error setting up client: %v", err)
 	}
-	defer teardown()
 
 	ctx := context.Background()
-	defer cleanupApplicants(ctx, client)
-
-	t.Run("CreateWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
-		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-		assert.NotNil(t, applicant, "applicant should not be nil")
-		assert.NotEmpty(t, applicant.ID, "applicant ID should not be empty")
-		assert.NotEmpty(t, applicant.Href, "applicant href should not be empty")
-		assert.Equal(t, "John", applicant.FirstName, "applicant first name should be John")
-		assert.Equal(t, "Doe", applicant.LastName, "applicant last name should be Doe")
-		assert.NotNil(t, applicant.CreatedAt, "applicant created at should not be nil")
-		assert.Nil(t, applicant.DeleteAt, "applicant delete at should be nil")
-	})
-
-	t.Run("ReturnErrorOnInvalidPayload", func(t *testing.T) {
-		_, err := client.CreateApplicant(ctx, onfido.CreateApplicantPayload{})
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "validation_error", "error should contain validation_error. got %v", err)
-
-		_, err = client.CreateApplicant(ctx, onfido.CreateApplicantPayload{FirstName: "John"})
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "validation_error", "error should contain validation_error. got %v", err)
-		assert.Containsf(t, err.Error(), "last_name", "error should contain last_name. got %v", err)
-
-		_, err = client.CreateApplicant(ctx, onfido.CreateApplicantPayload{LastName: "Doe"})
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "validation_error", "error should contain validation_error. got %v", err)
-		assert.Containsf(t, err.Error(), "first_name", "error should contain first_name. got %v", err)
-	})
-}
-
-func TestRetrieveApplicant(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
+	return &testRun{
+		ctx:    ctx,
+		client: client,
+		teardown: func() {
+			cleanupApplicants(ctx, client)
+			teardown()
+		},
 	}
-	defer teardown()
-
-	ctx := context.Background()
-	defer cleanupApplicants(ctx, client)
-
-	t.Run("RetrieveWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
-		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		fetchedApplicant, err := client.RetrieveApplicant(ctx, applicant.ID)
-		if err != nil {
-			assert.FailNowf(t, "error fetching applicant", "%v", err)
-		}
-
-		assert.NotNil(t, fetchedApplicant, "fetched applicant should not be nil")
-		assert.Equal(t, applicant.ID, fetchedApplicant.ID, "fetched applicant ID should be the same as created applicant")
-	})
-
-	t.Run("ReturnErrorOnInvalidApplicantID", func(t *testing.T) {
-		_, err := client.RetrieveApplicant(ctx, "invalid-id")
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "resource_not_found", "error should contain not_found. got %v", err)
-	})
 }
 
-func TestListApplicants(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
+func TestApplicant(t *testing.T) {
+	run := setupTestRun(t)
+	defer run.teardown()
+
+	t.Run("CreateApplicant", testCreateApplicant(run))
+	t.Run("RetrieveApplicant", testRetrieveApplicant(run))
+	t.Run("UpdateApplicant", testUpdateApplicant(run))
+	t.Run("DeleteApplicant", testDeleteApplicant(run))
+	t.Run("RestoreApplicant", testRestoreApplicant(run))
+	t.Run("ListApplicants", testListApplicants(run))
+}
+
+func testCreateApplicant(run *testRun) func(*testing.T) {
+	tests := []testCase[onfido.CreateApplicantPayload]{
+		{
+			name: "CreateWithoutErrors",
+			input: onfido.CreateApplicantPayload{
+				FirstName: "John",
+				LastName:  "Doe",
+			},
+		},
+		{
+			name:    "ReturnErrorOnEmptyPayload",
+			input:   onfido.CreateApplicantPayload{},
+			wantErr: true,
+			errMsg:  "validation_error",
+		},
+		{
+			name: "ReturnErrorOnMissingLastName",
+			input: onfido.CreateApplicantPayload{
+				FirstName: "John",
+			},
+			wantErr: true,
+			errMsg:  "last_name",
+		},
+		{
+			name: "ReturnErrorOnMissingFirstName",
+			input: onfido.CreateApplicantPayload{
+				LastName: "Doe",
+			},
+			wantErr: true,
+			errMsg:  "first_name",
+		},
 	}
-	defer teardown()
 
-	ctx := context.Background()
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				applicant, err := run.client.CreateApplicant(run.ctx, tt.input)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
 
-	cleanupApplicants(ctx, client)
-	defer cleanupApplicants(ctx, client)
-
-	t.Run("ListWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, applicant, "expected applicant to be created")
+				assert.NotEmpty(t, applicant.ID, "expected applicant ID to be set")
+				assert.NotEmpty(t, applicant.Href, "expected applicant href to be set")
+				assert.Equal(t, tt.input.FirstName, applicant.FirstName, "expected first name to be equal to input")
+				assert.Equal(t, tt.input.LastName, applicant.LastName, "expected last name to be equal to input")
+				assert.NotNil(t, applicant.CreatedAt, "expected created at to be set")
+			})
 		}
-
-		_, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		applicants, _, err := client.ListApplicants(ctx)
-		if err != nil {
-			assert.FailNowf(t, "error fetching applicants", "%v", err)
-		}
-
-		assert.NotNil(t, applicants, "applicants should not be nil")
-		assert.NotEmpty(t, applicants, "applicants should not be empty")
-	})
-
-	t.Run("ListWithPagination", func(t *testing.T) {
-		// Create 6 applicants, assuming that there are no other applicants in the account
-		createPayload := []onfido.CreateApplicantPayload{
-			{FirstName: "John", LastName: "Doe"},
-			{FirstName: "Alice", LastName: "Bob"},
-			{FirstName: "Jane", LastName: "Doe"},
-			{FirstName: "Bob", LastName: "Alice"},
-			{FirstName: "Doe", LastName: "John"},
-			{FirstName: "Doe", LastName: "Jane"},
-		}
-
-		for _, payload := range createPayload {
-			_, err := client.CreateApplicant(ctx, payload)
-			if err != nil {
-				assert.FailNowf(t, "error creating applicant", "%v", err)
-			}
-		}
-
-		opts := []onfido.IsListApplicantOption{
-			onfido.WithPage(1),
-			onfido.WithPageLimit(1),
-		}
-
-		applicants, _, err := client.ListApplicants(ctx, opts...)
-		if err != nil {
-			assert.FailNowf(t, "error fetching applicants", "%v", err)
-		}
-
-		assert.NotNil(t, applicants, "applicants should not be nil")
-		assert.NotEmpty(t, applicants, "applicants should not be empty")
-		assert.Equal(t, 1, len(applicants), "applicants length should be 1")
-	})
-
-	// t.Run("ListWithInvalidPagination", func(t *testing.T) {
-	// 	opts := []onfido.OnfidoPaginationOption{
-	// 		onfido.WithPage(0),
-	// 		onfido.WithPerPage(0),
-	// 	}
-	//
-	// 	_, err := client.ListApplicants(ctx, opts...)
-	// 	assert.Error(t, err, "error should not be nil")
-	// 	assert.Contains(t, err.Error(), "validation_error", "error should contain validation_error")
-	// })
-}
-
-func TestUpdateApplicant(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
 	}
-	defer teardown()
-
-	ctx := context.Background()
-	defer cleanupApplicants(ctx, client)
-
-	t.Run("UpdateWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
-		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		updatedPayload := onfido.CreateApplicantPayload{
-			FirstName: "Alice",
-			LastName:  "Bob",
-		}
-
-		updatedApplicant, err := client.UpdateApplicant(ctx, applicant.ID, updatedPayload)
-		if err != nil {
-			assert.FailNowf(t, "error updating applicant", "%v", err)
-		}
-		assert.NotNil(t, updatedApplicant, "updated applicant should not be nil")
-		assert.Equal(t, "Alice", updatedApplicant.FirstName, "updated applicant first name should be Alice")
-		assert.Equal(t, "Bob", updatedApplicant.LastName, "updated applicant last name should be Bob")
-	})
-
-	t.Run("ReturnErrorOnInvalidPayload", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
-		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		_, err = client.UpdateApplicant(ctx, applicant.ID, onfido.CreateApplicantPayload{Email: "invalid-email"})
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "validation_error", "error should contain validation_error. got %v", err)
-		assert.Containsf(t, err.Error(), "email", "error should contain email. got %v", err)
-	})
-
-	t.Run("ReturnErrorOnInvalidApplicantID", func(t *testing.T) {
-		_, err := client.UpdateApplicant(ctx, "invalid-id", onfido.CreateApplicantPayload{})
-		fmt.Println(err)
-		assert.Error(t, err, "error should not be nil")
-		assert.Contains(t, err.Error(), "resource_not_found", "error should contain not_found")
-	})
 }
 
-func TestDeleteApplicant(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
+func testRetrieveApplicant(run *testRun) func(*testing.T) {
+	tests := []testCase[string]{
+		{
+			name: "RetrieveWithoutErrors",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
+					FirstName: "John",
+					LastName:  "Doe",
+				})
+			},
+		},
+		{
+			name:    "ReturnErrorOnInvalidID",
+			input:   "invalid-id",
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
 	}
-	defer teardown()
 
-	ctx := context.Background()
-	defer cleanupApplicants(ctx, client)
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var applicantID string
+				if tt.setup != nil {
+					applicant, err := tt.setup(run.ctx, run.client)
+					if err != nil {
+						t.Fatalf("error setting up test: %v", err)
+					}
+					applicantID = applicant.(*onfido.Applicant).ID
+				} else {
+					applicantID = tt.input
+				}
 
-	t.Run("DeleteWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
+				fetchedApplicant, err := run.client.RetrieveApplicant(run.ctx, applicantID)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
+
+				assert.NoError(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, fetchedApplicant, "expected applicant to be fetched")
+				assert.Equal(t, applicantID, fetchedApplicant.ID, "expected applicant.ID to be equal to applicantID")
+			})
 		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		err = client.DeleteApplicant(ctx, applicant.ID)
-		if err != nil {
-			assert.FailNowf(t, "error deleting applicant", "%v", err)
-		}
-
-		applicant, err = client.RetrieveApplicant(ctx, applicant.ID)
-		assert.Error(t, err, "error should not be nil")
-		assert.Containsf(t, err.Error(), "scheduled for deletion", "error should contain not_found. got %v", err)
-		assert.Nil(t, applicant, "applicant should be nil")
-	})
-
-	t.Run("ReturnErrorOnInvalidApplicantID", func(t *testing.T) {
-		err := client.DeleteApplicant(ctx, "invalid-id")
-		assert.Error(t, err, "error should not be nil")
-		assert.Contains(t, err.Error(), "resource_not_found", "error should contain not_found")
-	})
-}
-
-func TestRestoreApplicant(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
 	}
-	defer teardown()
-
-	ctx := context.Background()
-	defer cleanupApplicants(ctx, client)
-
-	t.Run("RestoreWithoutErrors", func(t *testing.T) {
-		payload := onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "Doe",
-		}
-
-		applicant, err := client.CreateApplicant(ctx, payload)
-		if err != nil {
-			assert.FailNowf(t, "error creating applicant", "%v", err)
-		}
-
-		err = client.DeleteApplicant(ctx, applicant.ID)
-		if err != nil {
-			assert.FailNowf(t, "error deleting applicant", "%v", err)
-		}
-
-		err = client.RestoreApplicant(ctx, applicant.ID)
-		if err != nil {
-			assert.FailNowf(t, "error restoring applicant", "%v", err)
-		}
-
-		applicant, err = client.RetrieveApplicant(ctx, applicant.ID)
-		if err != nil {
-			assert.FailNowf(t, "error fetching applicant", "%v", err)
-		}
-		assert.NotNil(t, applicant, "applicant should not be nil")
-		assert.Nil(t, applicant.DeleteAt, "applicant delete at should be nil")
-	})
-
-	t.Run("ReturnErrorOnInvalidApplicantID", func(t *testing.T) {
-		err := client.RestoreApplicant(ctx, "invalid-id")
-		assert.Error(t, err, "error should not be nil")
-		assert.Contains(t, err.Error(), "resource_not_found", "error should contain not_found")
-	})
 }
 
-func cleanupApplicants(ctx context.Context, client *onfido.Client) {
-	fmt.Println("------- fetching applicants for cleanup -------")
+// testUpdateApplicant tests the update applicant functionality
+func testUpdateApplicant(run *testRun) func(*testing.T) {
+	tests := []testCase[struct {
+		id      string
+		payload onfido.CreateApplicantPayload
+	}]{
+		{
+			name: "UpdateWithoutErrors",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
+					FirstName: "John",
+					LastName:  "Doe",
+				})
+			},
+			input: struct {
+				id      string
+				payload onfido.CreateApplicantPayload
+			}{
+				payload: onfido.CreateApplicantPayload{
+					FirstName: "Alice",
+					LastName:  "Bob",
+				},
+			},
+		},
+		{
+			name: "ReturnErrorOnInvalidEmail",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
+					FirstName: "John",
+					LastName:  "Doe",
+				})
+			},
+			input: struct {
+				id      string
+				payload onfido.CreateApplicantPayload
+			}{
+				payload: onfido.CreateApplicantPayload{
+					Email: "invalid-email",
+				},
+			},
+			wantErr: true,
+			errMsg:  "validation_error",
+		},
+		{
+			name: "ReturnErrorOnInvalidID",
+			input: struct {
+				id      string
+				payload onfido.CreateApplicantPayload
+			}{
+				id:      "invalid-id",
+				payload: onfido.CreateApplicantPayload{},
+			},
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
+	}
+
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var applicantID string
+				if tt.setup != nil {
+					applicant, err := tt.setup(run.ctx, run.client)
+					if err != nil {
+						t.Fatalf("error setting up test: %v", err)
+					}
+					applicantID = applicant.(*onfido.Applicant).ID
+				} else {
+					applicantID = tt.input.id
+				}
+
+				updatedApplicant, err := run.client.UpdateApplicant(run.ctx, applicantID, tt.input.payload)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
+
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, updatedApplicant, "expected applicant to be updated")
+				if tt.input.payload.FirstName != "" {
+					assert.Equal(t, tt.input.payload.FirstName, updatedApplicant.FirstName, "expected first name to be updated")
+				}
+				if tt.input.payload.LastName != "" {
+					assert.Equal(t, tt.input.payload.LastName, updatedApplicant.LastName, "expected last name to be updated")
+				}
+			})
+		}
+	}
+}
+
+// testDeleteApplicant tests the delete applicant functionality
+func testDeleteApplicant(run *testRun) func(*testing.T) {
+	tests := []testCase[string]{
+		{
+			name: "DeleteWithoutErrors",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
+					FirstName: "John",
+					LastName:  "Doe",
+				})
+			},
+		},
+		{
+			name:    "ReturnErrorOnInvalidID",
+			input:   "invalid-id",
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
+	}
+
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var applicantID string
+				if tt.setup != nil {
+					applicant, err := tt.setup(run.ctx, run.client)
+					if err != nil {
+						t.Fatalf("error setting up test: %v", err)
+					}
+					applicantID = applicant.(*onfido.Applicant).ID
+				} else {
+					applicantID = tt.input
+				}
+
+				err := run.client.DeleteApplicant(run.ctx, applicantID)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
+
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+
+				// Verify deletion
+				applicant, err := run.client.RetrieveApplicant(run.ctx, applicantID)
+				assert.Errorf(t, err, expectedError, tt.name, err)
+				assert.Containsf(t, err.Error(), tt.errMsg, errorContains, "scheduled for deletion", err.Error())
+				assert.Nil(t, applicant, "expected applicant to be deleted")
+			})
+		}
+	}
+}
+
+// testRestoreApplicant tests the restore applicant functionality
+func testRestoreApplicant(run *testRun) func(*testing.T) {
+	tests := []testCase[string]{
+		{
+			name: "RestoreWithoutErrors",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				applicant, err := client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
+					FirstName: "John",
+					LastName:  "Doe",
+				})
+				if err != nil {
+					return nil, err
+				}
+
+				if err = client.DeleteApplicant(ctx, applicant.ID); err != nil {
+					return nil, err
+				}
+
+				return applicant, nil
+			},
+		},
+		{
+			name:    "ReturnErrorOnInvalidID",
+			input:   "invalid-id",
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
+	}
+
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var applicantID string
+				if tt.setup != nil {
+					applicant, err := tt.setup(run.ctx, run.client)
+					if err != nil {
+						t.Fatalf("error setting up test: %v", err)
+					}
+					applicantID = applicant.(*onfido.Applicant).ID
+				} else {
+					applicantID = tt.input
+				}
+
+				err := run.client.RestoreApplicant(run.ctx, applicantID)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
+
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+
+				// Verify restoration
+				applicant, err := run.client.RetrieveApplicant(run.ctx, applicantID)
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, applicant, "expected applicant to be restored")
+			})
+		}
+	}
+}
+
+func testListApplicants(run *testRun) func(*testing.T) {
+	if err := cleanupApplicants(run.ctx, run.client); err != nil {
+		log.Fatalf("error cleaning up applicants: %v", err)
+	}
+	if err := createTestApplicants(run); err != nil {
+		log.Fatalf("error creating test applicants: %v", err)
+	}
+
+	tests := []testCase[string]{
+		{
+			name: "ListWithoutPagination",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return nil, nil
+			},
+		},
+		{
+			name: "ListWithPaginationNoLimit",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return nil, nil
+			},
+		},
+		{
+			name: "ListWithPaginationAndLimit",
+			setup: func(ctx context.Context, client *onfido.Client) (interface{}, error) {
+				return nil, nil
+			},
+		},
+	}
+	return func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := tt.setup(run.ctx, run.client)
+				if err != nil {
+					t.Fatalf("error setting up test: %v", err)
+				}
+
+				if tt.name == "ListWithoutPagination" {
+					applicants, _, err := run.client.ListApplicants(run.ctx)
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assert.NotNilf(t, applicants, "expected applicants to be fetched. got %v", applicants)
+					assert.NotEmptyf(t, applicants, "expected applicants to be fetched. got %v", applicants)
+				} else {
+
+					withLimit := !strings.Contains(tt.name, "NoLimit")
+
+					// Test pagination
+					opts := []onfido.IsListApplicantOption{
+						onfido.WithPage(1),
+					}
+					if withLimit {
+						opts = append(opts, onfido.WithPageLimit(2))
+					}
+					// First page
+					applicants, page, err := run.client.ListApplicants(run.ctx, opts...)
+					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+					assertPaginationFirstPage(t, applicants, page, withLimit)
+
+					if withLimit {
+						// Second page
+						applicants, page, err = run.client.ListApplicants(run.ctx,
+							onfido.WithPage(*page.NextPage),
+							onfido.WithPageLimit(*page.Limit))
+						assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+						assertPaginationSecondPage(t, applicants, page)
+
+						// Last page
+						applicants, page, err = run.client.ListApplicants(run.ctx,
+							onfido.WithPage(*page.NextPage),
+							onfido.WithPageLimit(*page.Limit))
+						assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+						assertPaginationLastPage(t, applicants, page)
+					}
+				}
+			})
+		}
+	}
+}
+
+func createTestApplicants(run *testRun) error {
+	createPayload := []onfido.CreateApplicantPayload{
+		{FirstName: "John", LastName: "Doe"},
+		{FirstName: "Alice", LastName: "Bob"},
+		{FirstName: "Jane", LastName: "Doe"},
+		{FirstName: "Bob", LastName: "Alice"},
+		{FirstName: "Doe", LastName: "John"},
+		{FirstName: "Doe", LastName: "Jane"},
+	}
+
+	for _, payload := range createPayload {
+		_, err := run.client.CreateApplicant(run.ctx, payload)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func assertPaginationFirstPage[T any](t *testing.T, data []T, page *onfido.PageDetails, withLimit bool) {
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.Nilf(t, page.FirstPage, "expected first page to be nil. got %v", page.FirstPage)
+	assert.Nil(t, page.PrevPage, "expected prev page to be nil. got %v", page.PrevPage)
+	if withLimit {
+		assert.Lenf(t, data, 2, "expected data length to be 2. got %v", len(data))
+		assert.NotNil(t, page.Limit, "expected limit to be set")
+		assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+		assert.Equalf(t, 3, *page.LastPage, "expected last page to be 3. got %v", *page.LastPage)
+		assert.Equalf(t, 2, *page.NextPage, "expected next page to be 2. got %v", *page.NextPage)
+	} else {
+		assert.Lenf(t, data, 6, "expected data length to be 6. got %v", len(data))
+		assert.Nilf(t, page.Limit, "expected limit to be nil. got %v", page.Limit)
+		assert.Nilf(t, page.FirstPage, "expected first page to be nil. got %v", page.FirstPage)
+		assert.Nilf(t, page.LastPage, "expected last page to be nil. got %v", page.LastPage)
+		assert.Nilf(t, page.NextPage, "expected next page to be nil. got %v", page.NextPage)
+		assert.Nilf(t, page.PrevPage, "expected prev page to be nil. got %v", page.PrevPage)
+
+	}
+}
+
+func assertPaginationSecondPage[T any](t *testing.T, data []T, page *onfido.PageDetails) {
+	assert.Lenf(t, data, 2, "expected data length to be 2. got %v", len(data))
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.NotNil(t, page.Limit, "expected limit to be set")
+	assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+	assert.Equalf(t, 3, *page.LastPage, "expected last page to be 3. got %v", *page.LastPage)
+	assert.Equalf(t, 3, *page.NextPage, "expected next page to be 3. got %v", *page.NextPage)
+	assert.Equalf(t, 1, *page.FirstPage, "expected first page to be 1. got %v", *page.FirstPage)
+	assert.Equalf(t, 1, *page.PrevPage, "expected prev page to be 1. got %v", *page.PrevPage)
+}
+
+func assertPaginationLastPage[T any](t *testing.T, data []T, page *onfido.PageDetails) {
+	assert.Lenf(t, data, 2, "expected data length to be 2. got %v", len(data))
+	assert.NotNil(t, page, "expected page to be set")
+	assert.Equalf(t, 6, page.Total, "expected total to be 6. got %v", page.Total)
+	assert.NotNil(t, page.Limit, "expected limit to be set")
+	assert.Equalf(t, 2, *page.Limit, "expected limit to be 2. got %v", *page.Limit)
+	assert.Nilf(t, page.LastPage, "expected last page to be nil. got %v", page.LastPage)
+	assert.Nilf(t, page.NextPage, "expected next page to be nil. got %v", page.NextPage)
+	assert.NotNilf(t, page.FirstPage, "expected first page to be set. got %v", page.FirstPage)
+	assert.NotNilf(t, page.PrevPage, "expected prev page to be set. got %v", page.PrevPage)
+}
+
+func cleanupApplicants(ctx context.Context, client *onfido.Client) error {
 	applicants, page, err := client.ListApplicants(ctx, onfido.WithPageLimit(500))
 	if err != nil {
-		log.Fatalf("error fetching applicants: %v\n", err)
-		return
+		return err
 	}
 
-	fmt.Printf("----- found %d applicants. deleting... -----\n", len(applicants))
-
 	for _, applicant := range applicants {
-		err = client.DeleteApplicant(ctx, applicant.ID)
-		if err != nil {
-			log.Printf("error deleting applicant: %v\n", err)
-		} else {
-			fmt.Printf("deleted applicant: %s\n", applicant.ID)
+		if err := client.DeleteApplicant(ctx, applicant.ID); err != nil {
+			return err
 		}
 	}
 
 	if page.NextPage != nil {
-		fmt.Println("----- fetching next page -----")
-		cleanupApplicants(ctx, client)
+		if err := cleanupApplicants(ctx, client); err != nil {
+			return err
+		}
 	}
 
-	fmt.Println("----- applicants cleanup done -----")
+	return nil
 }

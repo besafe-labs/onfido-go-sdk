@@ -56,7 +56,12 @@ func WithHttpTimeout(timeout time.Duration) ClientOption {
 
 func WithHttpHeaders(headers http.Header) ClientOption {
 	return func(c *HttpClient) {
-		c.headers = headers
+		if c.headers == nil {
+			c.headers = make(http.Header)
+		}
+		for k, v := range headers {
+			c.headers[k] = v
+		}
 	}
 }
 

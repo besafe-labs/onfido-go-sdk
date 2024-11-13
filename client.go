@@ -148,6 +148,7 @@ func WithRegion(region apiRegion) ClientOption {
 
 type PageDetails struct {
 	Total     int
+	Limit     *int
 	FirstPage *int
 	LastPage  *int
 	NextPage  *int
@@ -203,21 +204,41 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 			continue
 		}
 		main, rel := splitted[0], strings.ReplaceAll(splitted[1], "\"", "")
+
+		page, per_page := 0, 0
+
+		// Check if the main string contains "per_page=" and extract the value
+		if strings.Contains(main, "per_page=") {
+			splittedMain := strings.Split(main, "&per_page=")
+			if len(splittedMain) != 2 {
+				continue
+			}
+			per_page, _ = strconv.Atoi(splittedMain[1])
+			main = splittedMain[0]
+		}
+
+		// extract the page number
 		splittedMain := strings.Split(main, "page=")
 		if len(splittedMain) != 2 {
 			continue
 		}
-		page, _ := strconv.Atoi(splittedMain[1])
+		page, _ = strconv.Atoi(splittedMain[1])
+
 		switch rel {
 		case "first":
 			pageResponse.FirstPage = &page
+			pageResponse.Limit = &per_page
 		case "last":
 			pageResponse.LastPage = &page
+			pageResponse.Limit = &per_page
 		case "next":
 			pageResponse.NextPage = &page
+			pageResponse.Limit = &per_page
 		case "prev":
 			pageResponse.PrevPage = &page
+			pageResponse.Limit = &per_page
 		}
+
 	}
 
 	return pageResponse

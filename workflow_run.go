@@ -2,6 +2,7 @@ package onfido
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk/internal/httpclient"
@@ -62,11 +63,17 @@ type CreateWorkflowRunLink struct {
 	Language             string     `json:"language,omitempty"`
 }
 
+// WorkflowRunEvidenceSummary represents the evidence summary file response
+type WorkflowRunEvidenceSummary struct {
+	Content     []byte // Raw PDF content
+	ContentType string // Content type of the file
+}
+
 // ------------------------------------------------------------------
 //                              OPTIONS
 // ------------------------------------------------------------------
 
-type isListWorkflowRunOption interface {
+type IsListWorkflowRunOption interface {
 	isListWorkflowRunOption()
 }
 
@@ -116,8 +123,9 @@ func (c *Client) RetrieveWorkflowRun(ctx context.Context, workflowRunID string) 
 	return &workflowRun, nil
 }
 
-func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...isListWorkflowRunOption) ([]WorkflowRun, error) {
+func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRunOption) ([]WorkflowRun, *PageDetails, error) {
 	var workflowRuns []WorkflowRun
+	var pageDetails PageDetails
 
 	req := func() error {
 		params := c.getListWorkflowRunParams(opts...)
@@ -127,17 +135,49 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...isListWorkflowRun
 			return err
 		}
 
+		pageDetails = c.extractPageDetails(resp.Headers)
 		return c.getResponseOrError(resp, &workflowRuns)
+	}
+
+	if err := c.do(ctx, req); err != nil {
+		return nil, nil, err
+	}
+
+	return workflowRuns, &pageDetails, nil
+}
+
+// RetrieveWorkflowRunEvidenceSummaryFile retrieves the signed evidence file for a workflow run
+// The file is returned as a PDF document
+func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, workflowRunID string) (*WorkflowRunEvidenceSummary, error) {
+	var evidenceSummary WorkflowRunEvidenceSummary
+
+	req := func() error {
+		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID+"/signed_evidence_file", c.getHttpRequestOptions())
+		if err != nil {
+			return fmt.Errorf("failed to retrieve evidence summary: %w", err)
+		}
+
+		contentType := resp.Headers.Get("Content-Type")
+		if contentType != "application/pdf" {
+			return fmt.Errorf("unexpected content type: %s", contentType)
+		}
+
+		evidenceSummary = WorkflowRunEvidenceSummary{
+			Content:     resp.Body,
+			ContentType: contentType,
+		}
+
+		return nil
 	}
 
 	if err := c.do(ctx, req); err != nil {
 		return nil, err
 	}
 
-	return workflowRuns, nil
+	return &evidenceSummary, nil
 }
 
-func (c Client) getListWorkflowRunParams(opts ...isListWorkflowRunOption) (params map[string]string) {
+func (c Client) getListWorkflowRunParams(opts ...IsListWorkflowRunOption) (params map[string]string) {
 	options := &listWorkflowRunOptions{paginationOption: &paginationOption{}}
 
 	for _, opt := range opts {

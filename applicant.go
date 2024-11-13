@@ -21,7 +21,7 @@ type Applicant struct {
 	FirstName   string     `json:"first_name,omitempty"`
 	LastName    string     `json:"last_name,omitempty"`
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
-	DeleteAt    *time.Time `json:"delete_at,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 	Href        string     `json:"href,omitempty"`
 	Sandbox     bool       `json:"sandbox,omitempty"`
 	Address     *Address   `json:"address,omitempty"`
