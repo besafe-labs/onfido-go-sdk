@@ -88,6 +88,12 @@ type listApplicantsOptions struct {
 	IncludeDeleted    bool `json:"include_deleted,omitempty"`
 }
 
+func WithIncludeDeletedApplicants() ListApplicantsOption {
+	return func(o *listApplicantsOptions) {
+		o.IncludeDeleted = true
+	}
+}
+
 // CreateApplicant creates a new applicant in the Onfido API
 func (c *Client) CreateApplicant(ctx context.Context, payload CreateApplicantPayload) (*Applicant, error) {
 	var applicant Applicant

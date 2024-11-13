@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/besafe-labs/onfido-go-sdk/internal/utils"
 )
 
 type HttpClient struct {
@@ -212,12 +215,17 @@ func (c *HttpClient) doRequest(ctx context.Context, method, path string, body in
 		}
 
 		resp, lastErr = c.client.Do(req)
-		if !shouldRetry(resp, lastErr) {
+		// if request is not successful and retries are not enabled or max retries reached, break the loop
+		if !shouldRetry(resp, lastErr) || attempt >= options.retries {
 			break
 		}
 
+		if utils.IsTestRun() {
+			log.Printf("\033[33m retrying request %s %s, attempt %d\033[0m\n", method, reqURL.String(), attempt+1)
+		}
+
 		// Close the response body if the request is going to be retried
-		if lastErr == nil && attempt < options.retries {
+		if lastErr == nil {
 			resp.Body.Close()
 		}
 	}

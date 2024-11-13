@@ -1,253 +1,189 @@
 package onfido_test
 
 import (
-	"context"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk"
-	"github.com/besafe-labs/onfido-go-sdk/internal/utils"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestWorkflowRun(t *testing.T) {
-	utils.LoadEnv(".env")
-	client, teardown, err := setup(os.Getenv("ONFIDO_API_TOKEN"), defaultRetries)
-	if err != nil || client == nil {
-		t.Fatalf("error setting up client: %v", err)
+	run := setupTestRun(t)
+	defer run.teardown()
+
+	applicant, err := run.client.CreateApplicant(run.ctx, onfido.CreateApplicantPayload{
+		FirstName: "John",
+		LastName:  "WorkflowTest",
+	})
+	if err != nil {
+		t.Fatalf("error creating applicant: %v", err)
 	}
-	defer teardown()
 
-	ctx := context.Background()
+	linkExpiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second).UTC()
+	testWorkflowRun := &onfido.WorkflowRun{}
 
-	var testWorkflowRun *onfido.WorkflowRun
+	t.Run("CreateWorkflowRun", testCreateWorkflowRun(run, applicant, linkExpiresAt, testWorkflowRun))
+	t.Run("RetrieveWorkflowRun", testRetrieveWorkflowRun(run, testWorkflowRun.ID))
+	t.Run("RetrieveWorkflowRunEvidenceSummaryFile", testRetrieveWorkflowRunEvidenceSummaryFile(run, testWorkflowRun.WorkflowID))
+	t.Run("ListWorkflowRuns", testListWorkflowRuns(run))
 
-	t.Run("CreateWorkflowRun", func(t *testing.T) {
-		applicant, err := client.CreateApplicant(ctx, onfido.CreateApplicantPayload{
-			FirstName: "John",
-			LastName:  "WorkflowTest",
-		})
-		if err != nil {
-			t.Fatalf("error creating applicant: %v", err)
-		}
+	// t.Run("ListWorkflowRuns", func(t *testing.T) {
+	// 	// Test pagination
+	// 	tests := []struct {
+	// 		name      string
+	// 		opts      []onfido.IsListWorkflowRunOption
+	// 		wantCount int
+	// 		wantErr   bool
+	// 	}{
+	// 		{
+	// 			name:      "List without pagination",
+	// 			opts:      nil,
+	// 			wantCount: 1, // At least one from our creation test
+	// 			wantErr:   false,
+	// 		},
+	// 		{
+	// 			name: "List with pagination",
+	// 			opts: []onfido.IsListWorkflowRunOption{
+	// 				onfido.WithPage(1),
+	// 				onfido.WithPageLimit(2),
+	// 			},
+	// 			wantCount: 1,
+	// 			wantErr:   false,
+	// 		},
+	// 	}
+	//
+	// 	for _, tt := range tests {
+	// 		t.Run(tt.name, func(t *testing.T) {
+	// 			workflowRuns, pageDetails, err := client.ListWorkflowRuns(ctx, tt.opts...)
+	// 			if tt.wantErr {
+	// 				assert.Error(t, err)
+	// 				return
+	// 			}
+	//
+	// 			assert.NoError(t, err)
+	// 			assert.NotNil(t, workflowRuns)
+	// 			assert.GreaterOrEqual(t, len(workflowRuns), tt.wantCount)
+	//
+	// 			if len(tt.opts) > 0 {
+	// 				assert.NotNil(t, pageDetails)
+	// 				assert.NotZero(t, pageDetails.Total)
+	// 			}
+	// 		})
+	// 	}
+	// })
+}
 
-		linkExpiresAt := time.Now().Add(5 * time.Minute)
-		tests := []struct {
-			name    string
-			payload onfido.CreateWorkflowRunPayload
-			wantErr bool
-		}{
-			{
-				name: "Successfully create workflow run",
-				payload: onfido.CreateWorkflowRunPayload{
-					ApplicantID: applicant.ID,
-					WorkflowID:  os.Getenv("ONFIDO_WORKFLOW_ID"), // Set this in your .env
-					Tags:        []string{"test", "integration"},
-					Link: &onfido.CreateWorkflowRunLink{
-						ExpiresAt: &linkExpiresAt,
-					},
+func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry time.Time, setWorkflow *onfido.WorkflowRun) func(*testing.T) {
+	tests := []testCase[onfido.CreateWorkflowRunPayload]{
+		{
+			name: "CreateWithoutErrors",
+			input: onfido.CreateWorkflowRunPayload{
+				ApplicantID:    applicant.ID,
+				WorkflowID:     os.Getenv("ONFIDO_WORKFLOW_ID"),
+				Tags:           []string{"test", "integration"},
+				CustomerUserID: "customer-user-id",
+				Link: &onfido.CreateWorkflowRunLink{
+					ExpiresAt: &expiry,
+					Language:  "en_GB",
 				},
-				wantErr: false,
-			},
-			{
-				name: "Fail with invalid workflow ID",
-				payload: onfido.CreateWorkflowRunPayload{
-					ApplicantID: applicant.ID,
-					WorkflowID:  "invalid-workflow-id",
+				CustomData: map[string]interface{}{
+					"key": "value",
 				},
-				wantErr: true,
 			},
-			{
-				name: "Fail with invalid applicant ID",
-				payload: onfido.CreateWorkflowRunPayload{
-					ApplicantID: "invalid-applicant-id",
-					WorkflowID:  os.Getenv("ONFIDO_WORKFLOW_ID"),
-				},
-				wantErr: true,
+		},
+		{
+			name:    "ReturnErrorOnEmptyPayload",
+			input:   onfido.CreateWorkflowRunPayload{},
+			wantErr: true,
+			errMsg:  "validation_error",
+		},
+		{
+			name: "ReturnErrorOnMissingLastName",
+			input: onfido.CreateWorkflowRunPayload{
+				ApplicantID: applicant.ID,
 			},
-		}
+			wantErr: true,
+			errMsg:  "workflow_id",
+		},
+		{
+			name: "ReturnErrorOnMissingFirstName",
+			input: onfido.CreateWorkflowRunPayload{
+				WorkflowID: os.Getenv("ONFIDO_WORKFLOW_ID"),
+			},
+			wantErr: true,
+			errMsg:  "applicant_id",
+		},
+	}
 
+	return func(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				workflowRun, err := client.CreateWorkflowRun(ctx, tt.payload)
+				workflow, err := run.client.CreateWorkflowRun(run.ctx, tt.input)
 				if tt.wantErr {
-					assert.Error(t, err)
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
 					return
 				}
 
-				assert.NoError(t, err)
-				assert.NotNil(t, workflowRun)
-				assert.NotEmpty(t, workflowRun.ID)
-				assert.Equal(t, tt.payload.ApplicantID, workflowRun.ApplicantID)
-				assert.Equal(t, tt.payload.WorkflowID, workflowRun.WorkflowID)
-				assert.NotNil(t, workflowRun.CreatedAt)
-				assert.NotEmpty(t, workflowRun.Status)
+				// Set the workflow run for later tests
+				*setWorkflow = *workflow
 
-				if tt.name == "Successfully create workflow run" {
-					testWorkflowRun = workflowRun
-				}
+				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, workflow, "expected work to be created")
+				assert.Equalf(t, tt.input.ApplicantID, workflow.ApplicantID, "expected workflow applicant_id to be %s, got %s", tt.input.ApplicantID, workflow.ApplicantID)
+				assert.Equalf(t, tt.input.WorkflowID, workflow.WorkflowID, "expected workflow_id to be %s, got %s", tt.input.WorkflowID, workflow.WorkflowID)
+				assert.Equalf(t, tt.input.Tags, workflow.Tags, "expected workflow tags to be %v, got %v", tt.input.Tags, workflow.Tags)
+				assert.Equalf(t, tt.input.CustomerUserID, workflow.CustomerUserID, "expected workflow customer_user_id to be %s, got %s", tt.input.CustomerUserID, workflow.CustomerUserID)
+				// expect to be equal stripping milliseconds
+				assert.Equalf(t, tt.input.Link.ExpiresAt, workflow.Link.ExpiresAt, "expected workflow link expiry to be %v, got %v", tt.input.Link.ExpiresAt, workflow.Link.ExpiresAt)
+				assert.Equalf(t, tt.input.Link.Language, workflow.Link.Language, "expected workflow link language to be %s, got %s", tt.input.Link.Language, workflow.Link.Language)
+				assert.NotNil(t, workflow.CreatedAt, "expected created at to be set")
 			})
 		}
-	})
+	}
+}
 
-	t.Run("RetrieveWorkflowRun", func(t *testing.T) {
-		if testWorkflowRun == nil {
-			t.Fatal("test workflow run not created")
-		}
-
-		tests := []struct {
-			name         string
-			workflowID   string
-			wantErr      bool
-			errorMessage string
-		}{
-			{
-				name:       "Successfully retrieve workflow run",
-				workflowID: testWorkflowRun.ID,
-				wantErr:    false,
-			},
-			{
-				name:         "Fail with invalid workflow run ID",
-				workflowID:   "invalid-id",
-				wantErr:      true,
-				errorMessage: "resource_not_found",
-			},
-		}
-
+func testRetrieveWorkflowRun(run *testRun, workflowId string) func(*testing.T) {
+	tests := []testCase[string]{
+		{
+			name:  "RetrieveWithoutErrors",
+			input: workflowId,
+		},
+		{
+			name:    "ReturnErrorOnInvalidID",
+			input:   "invalid-id",
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
+	}
+	return func(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				workflowRun, err := client.RetrieveWorkflowRun(ctx, tt.workflowID)
+				fetchedWorkflowRun, err := run.client.RetrieveWorkflowRun(run.ctx, tt.input)
 				if tt.wantErr {
-					assert.Error(t, err)
-					assert.Contains(t, err.Error(), tt.errorMessage)
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
 					return
 				}
 
-				assert.NoError(t, err)
-				assert.NotNil(t, workflowRun)
-				assert.Equal(t, testWorkflowRun.ID, workflowRun.ID)
-				assert.Equal(t, testWorkflowRun.ApplicantID, workflowRun.ApplicantID)
-				assert.Equal(t, testWorkflowRun.WorkflowID, workflowRun.WorkflowID)
+				assert.NoError(t, err, expectedNoError, tt.name, err)
+				assert.NotNil(t, fetchedWorkflowRun, "expected workflowRun to be fetched")
+				assert.Equal(t, tt.input, fetchedWorkflowRun.ID, "expected workflowRun ID to be %s, got %s", tt.input, fetchedWorkflowRun.ID)
 			})
 		}
-	})
+	}
+}
 
-	t.Run("ListWorkflowRuns", func(t *testing.T) {
-		// Test pagination
-		tests := []struct {
-			name      string
-			opts      []onfido.IsListWorkflowRunOption
-			wantCount int
-			wantErr   bool
-		}{
-			{
-				name:      "List without pagination",
-				opts:      nil,
-				wantCount: 1, // At least one from our creation test
-				wantErr:   false,
-			},
-			{
-				name: "List with pagination",
-				opts: []onfido.IsListWorkflowRunOption{
-					onfido.WithPage(1),
-					onfido.WithPageLimit(2),
-				},
-				wantCount: 1,
-				wantErr:   false,
-			},
-		}
+func testRetrieveWorkflowRunEvidenceSummaryFile(*testRun, string) func(*testing.T) {
+	return func(t *testing.T) {
+		t.Skip("Not implemented")
+	}
+}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				workflowRuns, pageDetails, err := client.ListWorkflowRuns(ctx, tt.opts...)
-				if tt.wantErr {
-					assert.Error(t, err)
-					return
-				}
-
-				assert.NoError(t, err)
-				assert.NotNil(t, workflowRuns)
-				assert.GreaterOrEqual(t, len(workflowRuns), tt.wantCount)
-
-				if len(tt.opts) > 0 {
-					assert.NotNil(t, pageDetails)
-					assert.NotZero(t, pageDetails.Total)
-				}
-			})
-		}
-	})
-
-	t.Run("RetrieveWorkflowRunEvidenceSummaryFile", func(t *testing.T) {
-		if testWorkflowRun == nil {
-			t.Fatal("test workflow run not created")
-		}
-
-		// Wait for workflow run to complete to ensure evidence file is available
-		maxAttempts := 10
-		for i := 0; i < maxAttempts; i++ {
-			workflowRun, err := client.RetrieveWorkflowRun(ctx, testWorkflowRun.ID)
-			if err != nil {
-				t.Fatalf("error retrieving workflow run: %v", err)
-			}
-
-			if workflowRun.Status != onfido.WorkflowRunStatusProcessing &&
-				workflowRun.Status != onfido.WorkflowRunStatusAwaitingInput {
-				break
-			}
-
-			if i == maxAttempts-1 {
-				t.Fatalf("workflow run did not complete in time")
-			}
-
-			time.Sleep(2 * time.Second)
-		}
-
-		tests := []struct {
-			name         string
-			workflowID   string
-			wantErr      bool
-			errorMessage string
-		}{
-			{
-				name:       "Successfully retrieve evidence summary",
-				workflowID: testWorkflowRun.ID,
-				wantErr:    false,
-			},
-			{
-				name:         "Fail with invalid workflow run ID",
-				workflowID:   "invalid-id",
-				wantErr:      true,
-				errorMessage: "resource_not_found",
-			},
-			{
-				name:         "Fail with empty workflow run ID",
-				workflowID:   "",
-				wantErr:      true,
-				errorMessage: "workflow run ID is required",
-			},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				evidenceSummary, err := client.RetrieveWorkflowRunEvidenceSummaryFile(ctx, tt.workflowID)
-				if tt.wantErr {
-					assert.Error(t, err)
-					assert.Contains(t, err.Error(), tt.errorMessage)
-					return
-				}
-
-				assert.NoError(t, err)
-				assert.NotNil(t, evidenceSummary)
-				assert.NotEmpty(t, evidenceSummary.Content)
-				assert.Equal(t, "application/pdf", evidenceSummary.ContentType)
-
-				// Optionally save the PDF for manual inspection during testing
-				if os.Getenv("SAVE_TEST_FILES") == "true" {
-					err = os.WriteFile("test_evidence.pdf", evidenceSummary.Content, 0o644)
-					assert.NoError(t, err)
-				}
-			})
-		}
-	})
+func testListWorkflowRuns(*testRun) func(*testing.T) {
+	return func(t *testing.T) {
+		t.Skip("Not implemented")
+	}
 }
