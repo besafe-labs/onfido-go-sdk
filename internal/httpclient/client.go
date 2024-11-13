@@ -19,10 +19,9 @@ import (
 )
 
 type HttpClient struct {
-	baseURL    string
-	client     *http.Client
-	headers    http.Header
-	maxRetries int
+	baseURL string
+	client  *http.Client
+	headers http.Header
 }
 
 // Create a new HTTP client
@@ -35,10 +34,9 @@ func NewHttpClient(baseURL string, opts ...ClientOption) *HttpClient {
 	}
 
 	c := &HttpClient{
-		baseURL:    baseURL,
-		client:     client,
-		headers:    make(http.Header),
-		maxRetries: 3,
+		baseURL: baseURL,
+		client:  client,
+		headers: make(http.Header),
 	}
 
 	for _, opt := range opts {
