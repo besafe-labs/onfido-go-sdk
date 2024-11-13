@@ -310,5 +310,5 @@ func shouldRetry(resp *http.Response, err error) bool {
 	if err != nil {
 		return true
 	}
-	return resp.StatusCode == 429 || resp.StatusCode >= 500
+	return resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
 }

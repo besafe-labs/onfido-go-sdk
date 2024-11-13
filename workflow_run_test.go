@@ -21,12 +21,15 @@ func TestWorkflowRun(t *testing.T) {
 		t.Fatalf("error creating applicant: %v", err)
 	}
 
-	linkExpiresAt := time.Now().Add(5 * time.Minute).Truncate(time.Second).UTC()
+	linkExpiresAt := time.Now().Add(30 * time.Minute).Truncate(time.Second).UTC()
 	testWorkflowRun := &onfido.WorkflowRun{}
 
 	t.Run("CreateWorkflowRun", testCreateWorkflowRun(run, applicant, linkExpiresAt, testWorkflowRun))
+	if testWorkflowRun.ID == "" {
+		t.Fatalf("workflow run ID is empty")
+	}
 	t.Run("RetrieveWorkflowRun", testRetrieveWorkflowRun(run, testWorkflowRun.ID))
-	t.Run("RetrieveWorkflowRunEvidenceSummaryFile", testRetrieveWorkflowRunEvidenceSummaryFile(run, testWorkflowRun.WorkflowID))
+	t.Run("RetrieveWorkflowRunEvidenceSummaryFile", testRetrieveWorkflowRunEvidenceSummaryFile(run, testWorkflowRun.ID))
 	t.Run("ListWorkflowRuns", testListWorkflowRuns(run))
 
 	// t.Run("ListWorkflowRuns", func(t *testing.T) {
@@ -76,6 +79,8 @@ func TestWorkflowRun(t *testing.T) {
 }
 
 func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry time.Time, setWorkflow *onfido.WorkflowRun) func(*testing.T) {
+	// read license file
+
 	tests := []testCase[onfido.CreateWorkflowRunPayload]{
 		{
 			name: "CreateWithoutErrors",
@@ -88,8 +93,8 @@ func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry tim
 					ExpiresAt: &expiry,
 					Language:  "en_GB",
 				},
-				CustomData: map[string]interface{}{
-					"key": "value",
+				CustomData: map[string]any{
+					"document_id": []any{},
 				},
 			},
 		},
@@ -118,6 +123,8 @@ func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry tim
 	}
 
 	return func(t *testing.T) {
+		sleep(t, 5)
+
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				workflow, err := run.client.CreateWorkflowRun(run.ctx, tt.input)
@@ -127,10 +134,13 @@ func testCreateWorkflowRun(run *testRun, applicant *onfido.Applicant, expiry tim
 					return
 				}
 
+				if err != nil {
+					t.Fatalf(expectedNoError, tt.name, err)
+				}
+
 				// Set the workflow run for later tests
 				*setWorkflow = *workflow
 
-				assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 				assert.NotNil(t, workflow, "expected work to be created")
 				assert.Equalf(t, tt.input.ApplicantID, workflow.ApplicantID, "expected workflow applicant_id to be %s, got %s", tt.input.ApplicantID, workflow.ApplicantID)
 				assert.Equalf(t, tt.input.WorkflowID, workflow.WorkflowID, "expected workflow_id to be %s, got %s", tt.input.WorkflowID, workflow.WorkflowID)
@@ -159,6 +169,7 @@ func testRetrieveWorkflowRun(run *testRun, workflowId string) func(*testing.T) {
 		},
 	}
 	return func(t *testing.T) {
+		sleep(t, 5)
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				fetchedWorkflowRun, err := run.client.RetrieveWorkflowRun(run.ctx, tt.input)
@@ -168,7 +179,10 @@ func testRetrieveWorkflowRun(run *testRun, workflowId string) func(*testing.T) {
 					return
 				}
 
-				assert.NoError(t, err, expectedNoError, tt.name, err)
+				if err != nil {
+					t.Fatalf(expectedNoError, tt.name, err)
+				}
+
 				assert.NotNil(t, fetchedWorkflowRun, "expected workflowRun to be fetched")
 				assert.Equal(t, tt.input, fetchedWorkflowRun.ID, "expected workflowRun ID to be %s, got %s", tt.input, fetchedWorkflowRun.ID)
 			})
@@ -176,9 +190,37 @@ func testRetrieveWorkflowRun(run *testRun, workflowId string) func(*testing.T) {
 	}
 }
 
-func testRetrieveWorkflowRunEvidenceSummaryFile(*testRun, string) func(*testing.T) {
+func testRetrieveWorkflowRunEvidenceSummaryFile(run *testRun, workflowRunId string) func(*testing.T) {
+	tests := []testCase[string]{
+		{
+			name:  "RetrieveWithoutErrors",
+			input: workflowRunId,
+		},
+		{
+			name:    "ReturnErrorOnInvalidID",
+			input:   "invalid-id",
+			wantErr: true,
+			errMsg:  "resource_not_found",
+		},
+	}
+
 	return func(t *testing.T) {
-		t.Skip("Not implemented")
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				evidenceSummary, err := run.client.RetrieveWorkflowRunEvidenceSummaryFile(run.ctx, tt.input)
+				if tt.wantErr {
+					assert.Errorf(t, err, expectedError, tt.name, err)
+					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
+					return
+				}
+				if err != nil {
+					t.Fatalf("error retrieving evidence summary: %v", err)
+				}
+
+				assert.NotNil(t, evidenceSummary, "expected evidenceSummary to be fetched")
+				assert.NotEmptyf(t, evidenceSummary.URL, "expected evidenceSummary url to not be empty")
+			})
+		}
 	}
 }
 

@@ -86,21 +86,34 @@ func (c Client) getHttpRequestOptions() httpclient.RequestOption {
 }
 
 func (c Client) getResponseOrError(resp *httpclient.HttpResponse, dest interface{}) error {
-	unknownErrType := "unknown internal error"
+	if err := c.getError(resp, false); err != nil {
+		return err
+	}
+
+	if dest != nil {
+		if err := resp.DecodeJSON(dest); err != nil {
+			return &OnfidoError{Type: "unknown internal error", Message: err.Error()}
+		}
+	}
+
+	return nil
+}
+
+func (c Client) getError(resp *httpclient.HttpResponse, ingoreFound bool) error {
+	// if ingoreFound is true, then we ignore the http.StatusFound status code
+	if resp.StatusCode == http.StatusFound && ingoreFound {
+		return nil
+	}
+
+	// any status code between 200 and 299 is considered a success
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var onfidoError struct {
 			Error *OnfidoError `json:"error"`
 		}
 		if err := resp.DecodeJSON(&onfidoError); err != nil {
-			return &OnfidoError{Type: unknownErrType, Message: err.Error()}
+			return &OnfidoError{Type: "unknown internal error", Message: fmt.Sprintf("OnfidoErrorDecode: %v", err.Error())}
 		}
 		return onfidoError.Error
-	}
-
-	if dest != nil {
-		if err := resp.DecodeJSON(dest); err != nil {
-			return &OnfidoError{Type: unknownErrType, Message: err.Error()}
-		}
 	}
 
 	return nil
@@ -145,6 +158,15 @@ func WithRegion(region apiRegion) ClientOption {
 // ------------------------------------------------------------------
 //                              PAGINATION
 // ------------------------------------------------------------------
+
+type sortDirection string
+
+const (
+	// SortAsc is the ascending sort direction
+	SortAsc sortDirection = "asc"
+	// SortDesc is the descending sort direction
+	SortDesc sortDirection = "desc"
+)
 
 type PageDetails struct {
 	Total     int
@@ -242,34 +264,4 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 	}
 
 	return pageResponse
-}
-
-// ------------------------------------------------------------------
-//                              ERROR
-// ------------------------------------------------------------------
-
-type OnfidoError struct {
-	Type    string         `json:"type,omitempty"`
-	Message string         `json:"message,omitempty"`
-	Fields  map[string]any `json:"fields,omitempty"`
-}
-
-func (e OnfidoError) Error() string {
-	// build a string representation of the Error
-	msg := "OnfidoError - "
-	if e.Type != "" {
-		msg += fmt.Sprintf("Type: %s\n", e.Type)
-	}
-
-	if e.Message != "" {
-		msg += fmt.Sprintf("\tMessage: %s\n", e.Message)
-	}
-
-	if len(e.Fields) > 0 {
-		msg += "\tFields:\t"
-		for k, v := range e.Fields {
-			msg += fmt.Sprintf("%s - %v\n\t\t", k, v)
-		}
-	}
-	return msg
 }

@@ -94,6 +94,10 @@ func WithIncludeDeletedApplicants() ListApplicantsOption {
 	}
 }
 
+// ------------------------------------------------------------------
+//                              METHODS
+// ------------------------------------------------------------------
+
 // CreateApplicant creates a new applicant in the Onfido API
 func (c *Client) CreateApplicant(ctx context.Context, payload CreateApplicantPayload) (*Applicant, error) {
 	var applicant Applicant
@@ -116,6 +120,10 @@ func (c *Client) CreateApplicant(ctx context.Context, payload CreateApplicantPay
 
 // UpdateApplicant updates an existing applicant in the Onfido API
 func (c *Client) UpdateApplicant(ctx context.Context, applicantId string, payload CreateApplicantPayload) (*Applicant, error) {
+	if applicantId == "" {
+		return nil, ErrInvalidId
+	}
+
 	var applicant Applicant
 
 	req := func() error {
@@ -136,6 +144,10 @@ func (c *Client) UpdateApplicant(ctx context.Context, applicantId string, payloa
 
 // RetrieveApplicant retrieves an applicant from the Onfido API
 func (c *Client) RetrieveApplicant(ctx context.Context, applicantId string) (*Applicant, error) {
+	if applicantId == "" {
+		return nil, ErrInvalidId
+	}
+
 	var applicant Applicant
 
 	req := func() error {
@@ -188,6 +200,10 @@ func (c *Client) ListApplicants(ctx context.Context, opts ...IsListApplicantOpti
 
 // DeleteApplicant deletes an applicant from the Onfido API
 func (c *Client) DeleteApplicant(ctx context.Context, applicantId string) error {
+	if applicantId == "" {
+		return ErrInvalidId
+	}
+
 	req := func() error {
 		resp, err := c.client.Delete(ctx, "/applicants/"+applicantId, c.getHttpRequestOptions())
 		if err != nil {
@@ -206,6 +222,10 @@ func (c *Client) DeleteApplicant(ctx context.Context, applicantId string) error 
 
 // RestoreApplicant restores a deleted applicant in the Onfido API
 func (c *Client) RestoreApplicant(ctx context.Context, applicantId string) error {
+	if applicantId == "" {
+		return ErrInvalidId
+	}
+
 	req := func() error {
 		resp, err := c.client.Post(ctx, "/applicants/"+applicantId+"/restore", nil, c.getHttpRequestOptions())
 		if err != nil {

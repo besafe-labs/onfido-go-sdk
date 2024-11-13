@@ -65,8 +65,7 @@ type CreateWorkflowRunLink struct {
 
 // WorkflowRunEvidenceSummary represents the evidence summary file response
 type WorkflowRunEvidenceSummary struct {
-	Content     []byte // Raw PDF content
-	ContentType string // Content type of the file
+	URL string `json:"url,omitempty"`
 }
 
 // ------------------------------------------------------------------
@@ -83,7 +82,50 @@ func (ListWorkflowRunOption) isListWorkflowRunOption() {}
 
 type listWorkflowRunOptions struct {
 	*paginationOption
+	Status        WorkflowRunStatus `json:"status,omitempty"`
+	Tags          []string          `json:"tags,omitempty"`
+	CreatedAfter  *time.Time        `json:"created_at_gt,omitempty"`
+	CreatedBefore *time.Time        `json:"created_at_lt,omitempty"`
+	Sort          sortDirection     `json:"sort,omitempty"`
 }
+
+func WithWorkflowRunStatus(status WorkflowRunStatus) ListWorkflowRunOption {
+	return func(o *listWorkflowRunOptions) {
+		o.Status = status
+	}
+}
+
+func WithWorkflowRunTags(tags ...string) ListWorkflowRunOption {
+	return func(o *listWorkflowRunOptions) {
+		if len(tags) > 0 {
+			o.Tags = append(o.Tags, tags...)
+			return
+		}
+		o.Tags = tags
+	}
+}
+
+func WithWorkflowRunCreatedAfter(date time.Time) ListWorkflowRunOption {
+	return func(o *listWorkflowRunOptions) {
+		o.CreatedAfter = &date
+	}
+}
+
+func WithWorkflowRunCreatedBefore(date time.Time) ListWorkflowRunOption {
+	return func(o *listWorkflowRunOptions) {
+		o.CreatedBefore = &date
+	}
+}
+
+func WithWorkflowRunSort(sort sortDirection) ListWorkflowRunOption {
+	return func(o *listWorkflowRunOptions) {
+		o.Sort = sort
+	}
+}
+
+// ------------------------------------------------------------------
+//                              METHODS
+// ------------------------------------------------------------------
 
 func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRunPayload) (*WorkflowRun, error) {
 	var workflowRun WorkflowRun
@@ -91,7 +133,7 @@ func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRu
 	req := func() error {
 		resp, err := c.client.Post(ctx, "/workflow_runs", payload)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to send request: %w", err)
 		}
 
 		return c.getResponseOrError(resp, &workflowRun)
@@ -105,6 +147,10 @@ func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRu
 }
 
 func (c *Client) RetrieveWorkflowRun(ctx context.Context, workflowRunID string) (*WorkflowRun, error) {
+	if workflowRunID == "" {
+		return nil, ErrInvalidId
+	}
+
 	var workflowRun WorkflowRun
 
 	req := func() error {
@@ -154,18 +200,19 @@ func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, wor
 	req := func() error {
 		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID+"/signed_evidence_file", c.getHttpRequestOptions())
 		if err != nil {
-			return fmt.Errorf("failed to retrieve evidence summary: %w", err)
+			return fmt.Errorf("failed to retrieve evidence summary file: %v", err)
 		}
 
-		contentType := resp.Headers.Get("Content-Type")
-		if contentType != "application/pdf" {
-			return fmt.Errorf("unexpected content type: %s", contentType)
+		if err := c.getError(resp, true); err != nil {
+			return err
 		}
 
-		evidenceSummary = WorkflowRunEvidenceSummary{
-			Content:     resp.Body,
-			ContentType: contentType,
+		location := resp.Headers.Get("Location")
+		if location == "" {
+			return fmt.Errorf("failed to retrieve evidence summary file for %s", workflowRunID)
 		}
+
+		evidenceSummary = WorkflowRunEvidenceSummary{URL: location}
 
 		return nil
 	}
