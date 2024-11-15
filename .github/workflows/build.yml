@@ -29,14 +29,14 @@ jobs:
         run: |
           go test -race -covermode atomic -coverprofile=covprofile ./...
 
-      - name: Install goveralls
-        run: go install github.com/mattn/goveralls@latest
-
-      - name: Send coverage
-        env:
-          COVERALLS_TOKEN: ${{ secrets.COVERALLS_TOKEN }}
-          GIT_BRANCH: ${{ github.ref }}
-        run: |
-          goveralls -coverprofile=covprofile -service=github \
-            -repotoken ${{ secrets.COVERALLS_TOKEN }} \
-            -parallel -flagname="unit-tests"
+      # - name: Install goveralls
+      #   run: go install github.com/mattn/goveralls@latest
+      #
+      # - name: Send coverage
+      #   env:
+      #     COVERALLS_TOKEN: ${{ secrets.COVERALLS_TOKEN }}
+      #     GIT_BRANCH: ${{ github.ref }}
+      #   run: |
+      #     goveralls -coverprofile=covprofile -service=github \
+      #       -repotoken ${{ secrets.COVERALLS_TOKEN }} \
+      #       -parallel -flagname="unit-tests"
