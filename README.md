@@ -11,20 +11,44 @@ go get github.com/besafe-labs/onfido-go-sdk
 ## Usage
 
 ```go
-import "github.com/besafe-labs/onfido-go-sdk"
 
-// Initialize the client
-client, err := onfido.NewClient("your-api-token")
-if err != nil {
-    log.Fatal(err)
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/besafe-labs/onfido-go-sdk"
+)
+
+func main() {
+	client, err := onfido.NewClient("your-api-token")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	// Create an applicant
+	applicant, err := client.CreateApplicant(context.Background(), onfido.CreateApplicantPayload{
+		FirstName: "John",
+		LastName:  "Doe",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create a workflow run
+	workflowRun, err := client.CreateWorkflowRun(context.Background(), onfido.CreateWorkflowRunPayload{
+		ApplicantID: applicant.ID,
+		WorkflowID:  "your-workflow-id",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Workflow run created: %s", workflowRun.ID)
 }
-defer client.Close()
 
-// Create an applicant
-applicant, err := client.CreateApplicant(context.Background(), onfido.CreateApplicantPayload{
-    FirstName: "John",
-    LastName:  "Doe",
-})
 ```
 
 ## Available Resources
@@ -78,6 +102,23 @@ type OnfidoError struct {
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Tests
+
+This SDK directly tests with the onfido API. To run the tests, you need to provide your API token as an environment variable:
+
+```bash
+# Set environment variables
+export ONFIDO_API_TOKEN=your-api-token
+export ONFIDO_WORKFLOW_ID=your-workflow-id
+
+# Run tests
+go test -v
+```
+
+## Related Projects
+
+- [go-onfido](https://github.com/uw-labs/go-onfido) - Another version of go SDK for Onfido API. This sdk was found after bootstrapping this SDK project.
 
 ## License
 

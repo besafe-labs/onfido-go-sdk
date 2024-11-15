@@ -124,6 +124,12 @@ func testRetrieveWorkflowRun(run *testRun, workflowId string) func(*testing.T) {
 			wantErr: true,
 			errMsg:  "resource_not_found",
 		},
+		{
+			name:    "ReturnErrorOnEmptyID",
+			input:   "",
+			wantErr: true,
+			errMsg:  "validation_error",
+		},
 	}
 	return func(t *testing.T) {
 		sleep(t, 5)
@@ -158,6 +164,12 @@ func testRetrieveWorkflowRunEvidenceSummaryFile(run *testRun, workflowRunId stri
 			input:   "invalid-id",
 			wantErr: true,
 			errMsg:  "resource_not_found",
+		},
+		{
+			name:    "ReturnErrorOnEmptyID",
+			input:   "",
+			wantErr: true,
+			errMsg:  "validation_error",
 		},
 	}
 

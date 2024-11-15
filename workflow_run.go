@@ -143,7 +143,7 @@ func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRu
 	req := func() error {
 		resp, err := c.client.Post(ctx, "/workflow_runs", payload)
 		if err != nil {
-			return fmt.Errorf("failed to send request: %w", err)
+			return err
 		}
 
 		return c.getResponseOrError(resp, &workflowRun)
@@ -210,12 +210,16 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRun
 
 // RetrieveWorkflowRunEvidenceSummaryFile retrieves the signed evidence file for a workflow run
 func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, workflowRunID string) (*WorkflowRunEvidenceSummary, error) {
+	if workflowRunID == "" {
+		return nil, ErrInvalidId
+	}
+
 	var evidenceSummary WorkflowRunEvidenceSummary
 
 	req := func() error {
 		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID+"/signed_evidence_file", c.getHttpRequestOptions())
 		if err != nil {
-			return fmt.Errorf("failed to retrieve evidence summary file: %v", err)
+			return err
 		}
 
 		if err := c.getError(resp, true); err != nil {
