@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk/internal/httpclient"
-	"github.com/davecgh/go-spew/spew"
 )
 
 // ------------------------------------------------------------------
 //                              WORKFLOW RUN
 // ------------------------------------------------------------------
 
+// WorkflowRun represents a workflow run in the Onfido API
 type WorkflowRun struct {
 	ID                string            `json:"id,omitempty"`
 	ApplicantID       string            `json:"applicant_id,omitempty"`
@@ -37,6 +37,7 @@ type WorkflowRunLink struct {
 	CreateWorkflowRunLink `json:",inline"`
 }
 
+// WorkflowRunStatus represents the status of a workflow run
 type WorkflowRunStatus string
 
 const (
@@ -107,12 +108,18 @@ func WithWorkflowRunTags(tags ...string) ListWorkflowRunOption {
 	}
 }
 
+// WithWorkflowRunCreatedAfter filters the list of workflow runs to those created after the specified date.
+//
+// The hour, minute, second and timezone of the date are ignored, onfido throws an error for any other format.
 func WithWorkflowRunCreatedAfter(date time.Time) ListWorkflowRunOption {
 	return func(o *listWorkflowRunOptions) {
 		o.CreatedAfter = &date
 	}
 }
 
+// WithWorkflowRunCreatedBefore filters the list of workflow runs to those created before the specified date.
+//
+// The hour, minute, second and timezone of the date are ignored, onfido throws an error for any other format.
 func WithWorkflowRunCreatedBefore(date time.Time) ListWorkflowRunOption {
 	return func(o *listWorkflowRunOptions) {
 		o.CreatedBefore = &date
@@ -129,6 +136,7 @@ func WithWorkflowRunSort(sort sortDirection) ListWorkflowRunOption {
 //                              METHODS
 // ------------------------------------------------------------------
 
+// CreateWorkflowRun creates a new workflow run in the Onfido API
 func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRunPayload) (*WorkflowRun, error) {
 	var workflowRun WorkflowRun
 
@@ -148,6 +156,7 @@ func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRu
 	return &workflowRun, nil
 }
 
+// RetrieveWorkflowRun retrieves a workflow run from the Onfido API
 func (c *Client) RetrieveWorkflowRun(ctx context.Context, workflowRunID string) (*WorkflowRun, error) {
 	if workflowRunID == "" {
 		return nil, ErrInvalidId
@@ -171,6 +180,7 @@ func (c *Client) RetrieveWorkflowRun(ctx context.Context, workflowRunID string) 
 	return &workflowRun, nil
 }
 
+// ListWorkflowRuns retrieves a list of workflow runs from the Onfido API
 func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRunOption) ([]WorkflowRun, *PageDetails, error) {
 	var workflowRuns []WorkflowRun
 	var pageDetails PageDetails
@@ -199,7 +209,6 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRun
 }
 
 // RetrieveWorkflowRunEvidenceSummaryFile retrieves the signed evidence file for a workflow run
-// The file is returned as a PDF document
 func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, workflowRunID string) (*WorkflowRunEvidenceSummary, error) {
 	var evidenceSummary WorkflowRunEvidenceSummary
 
@@ -256,19 +265,15 @@ func (c Client) getListWorkflowRunParams(opts ...IsListWorkflowRunOption) (param
 	}
 
 	if options.CreatedAfter != nil {
-		params["created_at_gt"] = options.CreatedAfter.Format("2006-01-02T15:04:05.999Z")
+		params["created_at_gt"] = options.CreatedAfter.Format("2006-01-02")
 	}
 
 	if options.CreatedBefore != nil {
-		params["created_at_lt"] = options.CreatedBefore.Format("2006-01-02T15:04:05.999Z")
+		params["created_at_lt"] = options.CreatedBefore.Format("2006-01-02")
 	}
 
 	if options.Sort != "" {
 		params["sort"] = string(options.Sort)
-	}
-
-	if options.CreatedAfter != nil || options.CreatedBefore != nil {
-		spew.Dump(params)
 	}
 
 	return

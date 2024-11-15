@@ -29,7 +29,9 @@ type Applicant struct {
 }
 
 type CreateApplicantPayload struct {
-	FirstName   string     `json:"first_name,omitempty"`
+	// FirstName is the first name of the applicant, required
+	FirstName string `json:"first_name,omitempty"`
+	// LastName is the last name of the applicant, required
 	LastName    string     `json:"last_name,omitempty"`
 	Email       string     `json:"email,omitempty"`
 	Dob         time.Time  `json:"dob,omitempty"`
@@ -86,7 +88,8 @@ func (ListApplicantsOption) isListApplicantOption() {}
 type listApplicantsOptions struct {
 	*paginationOption      `json:",inline"`
 	*limitPaginationOption `json:",inline"`
-	IncludeDeleted         bool `json:"include_deleted,omitempty"`
+	// IncludeDeleted is a flag to include deleted applicants in the response
+	IncludeDeleted bool `json:"include_deleted,omitempty"`
 }
 
 func WithIncludeDeletedApplicants() ListApplicantsOption {

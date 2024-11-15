@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/besafe-labs/onfido-go-sdk"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -262,6 +261,7 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 						onfido.WithWorkflowRunTags("test"))
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					assert.GreaterOrEqual(t, len(workflowRuns), 1, "expected at least one workflow run to be fetched")
 					for _, run := range workflowRuns {
 						assert.Contains(t, run.Tags, "test", "expected workflow run to have test tag")
 					}
@@ -271,13 +271,13 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 						onfido.WithWorkflowRunStatus(onfido.WorkflowRunStatusProcessing))
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					assert.GreaterOrEqual(t, len(workflowRuns), 1, "expected at least one workflow run to be fetched")
 					for _, run := range workflowRuns {
 						assert.Equal(t, onfido.WorkflowRunStatusProcessing, run.Status,
 							"expected workflow run to have processing status")
 					}
 
 				case isWithDateRange:
-					t.Skip("api error says invalid date for all dates")
 					// Test date range filtering
 					now := time.Now()
 					yesterday := now.AddDate(0, 0, -1)
@@ -290,6 +290,7 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 					)
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					assert.GreaterOrEqual(t, len(workflowRuns), 1, "expected at least one workflow run to be fetched")
 					for _, run := range workflowRuns {
 						assert.True(t, run.CreatedAt.After(yesterday),
 							"expected workflow run to be created after yesterday")
@@ -302,6 +303,7 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 						onfido.WithWorkflowRunSort(onfido.SortAsc))
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					assert.GreaterOrEqual(t, len(workflowRuns), 2, "expected at least 2 workflow runs to be fetched")
 					// Verify ascending order
 					if len(workflowRuns) > 1 {
 						for i := 1; i < len(workflowRuns); i++ {
@@ -316,6 +318,7 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 						onfido.WithWorkflowRunSort(onfido.SortDesc))
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
+					assert.GreaterOrEqual(t, len(workflowRuns), 2, "expected at least 2 workflow runs to be fetched")
 					// Verify descending order
 					if len(workflowRuns) > 1 {
 						for i := 1; i < len(workflowRuns); i++ {
@@ -327,32 +330,30 @@ func testListWorkflowRuns(run *testRun, linkExpiry time.Time) func(*testing.T) {
 
 				case isWithMultipleFilters:
 					// Test combining multiple filters
-					// now := time.Now()
-					// yesterday := now.AddDate(0, 0, -1)
+					now := time.Now()
+					yesterday := now.AddDate(0, 0, -1)
 					workflowRuns, _, err := run.client.ListWorkflowRuns(run.ctx,
 						onfido.WithWorkflowRunTags("test"),
 						onfido.WithWorkflowRunStatus(onfido.WorkflowRunStatusProcessing),
-						// onfido.WithWorkflowRunCreatedAfter(yesterday),
+						onfido.WithWorkflowRunCreatedAfter(yesterday),
 						onfido.WithWorkflowRunSort(onfido.SortDesc),
 					)
-					spew.Dump(workflowRuns)
 					assert.NoErrorf(t, err, expectedNoError, tt.name, err)
 					assert.NotNilf(t, workflowRuns, "expected workflow runs to be fetched")
-					if len(workflowRuns) > 0 {
-						// Verify filters are applied
-						for _, run := range workflowRuns {
-							assert.Contains(t, run.Tags, "test", "expected workflow run to have test tag")
-							assert.Equal(t, onfido.WorkflowRunStatusProcessing, run.Status,
-								"expected workflow run to have processing status")
-							// assert.True(t, run.CreatedAt.After(yesterday),
-							// 	"expected workflow run to be created after yesterday")
-						}
-						// Verify descending order
-						if len(workflowRuns) > 1 {
-							assert.True(t, workflowRuns[1].CreatedAt.Before(*workflowRuns[0].CreatedAt) ||
-								workflowRuns[1].CreatedAt.Equal(*workflowRuns[0].CreatedAt),
-								"expected workflow runs to be sorted in descending order")
-						}
+					assert.GreaterOrEqual(t, len(workflowRuns), 2, "expected at least 2 workflow run to be fetched")
+					// Verify filters are applied
+					for _, run := range workflowRuns {
+						assert.Contains(t, run.Tags, "test", "expected workflow run to have test tag")
+						assert.Equal(t, onfido.WorkflowRunStatusProcessing, run.Status,
+							"expected workflow run to have processing status")
+						assert.True(t, run.CreatedAt.After(yesterday),
+							"expected workflow run to be created after yesterday")
+					}
+					// Verify descending order
+					if len(workflowRuns) > 1 {
+						assert.True(t, workflowRuns[1].CreatedAt.Before(*workflowRuns[0].CreatedAt) ||
+							workflowRuns[1].CreatedAt.Equal(*workflowRuns[0].CreatedAt),
+							"expected workflow runs to be sorted in descending order")
 					}
 				}
 			})
