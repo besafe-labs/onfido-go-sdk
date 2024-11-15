@@ -1,5 +1,10 @@
 # Onfido Go SDK
 
+![CodeQL](https://github.com/besafe-labs/onfido-go-sdk/actions/workflows/codeql.yml/badge.svg)
+![Build & Tests](https://github.com/besafe-labs/onfido-go-sdk/actions/workflows/build.yml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/besafe-labs/onfido-go-sdk)](https://goreportcard.com/report/github.com/besafe-labs/onfido-go-sdk)
+[![Go Reference](https://pkg.go.dev/badge/github.com/besafe-labs/onfido-go-sdk.svg)](https://pkg.go.dev/github.com/besafe-labs/onfido-go-sdk)
+
 An unofficial Go SDK for interacting with the Onfido API. This SDK was created because Onfido does not provide an official Go SDK for developers.
 
 ## Installation
