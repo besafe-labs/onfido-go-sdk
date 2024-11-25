@@ -3,8 +3,6 @@ package onfido
 import (
 	"context"
 	"time"
-
-	"github.com/besafe-labs/onfido-go-sdk/internal/httpclient"
 )
 
 // ------------------------------------------------------------------
@@ -107,7 +105,12 @@ func (c *Client) CreateApplicant(ctx context.Context, payload CreateApplicantPay
 	var applicant Applicant
 
 	req := func() error {
-		resp, err := c.client.Post(ctx, "/applicants", payload)
+		body, err := c.buildJSON(payload)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.client.Post(ctx, "/applicants", body)
 		if err != nil {
 			return err
 		}
@@ -131,7 +134,12 @@ func (c *Client) UpdateApplicant(ctx context.Context, applicantId string, payloa
 	var applicant Applicant
 
 	req := func() error {
-		resp, err := c.client.Put(ctx, "/applicants/"+applicantId, payload, c.getHttpRequestOptions())
+		body, err := c.buildJSON(payload)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.client.Put(ctx, "/applicants/"+applicantId, body, c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}
@@ -155,7 +163,7 @@ func (c *Client) RetrieveApplicant(ctx context.Context, applicantId string) (*Ap
 	var applicant Applicant
 
 	req := func() error {
-		resp, err := c.client.Get(ctx, "/applicants/"+applicantId, c.getHttpRequestOptions())
+		resp, err := c.client.Get(ctx, "/applicants/"+applicantId, c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}
@@ -178,7 +186,7 @@ func (c *Client) ListApplicants(ctx context.Context, opts ...IsListApplicantOpti
 	req := func() error {
 		params := c.getListApplicantParams(opts...)
 
-		resp, err := c.client.Get(ctx, "/applicants", httpclient.WithHttpQueryParams(params), c.getHttpRequestOptions())
+		resp, err := c.client.Get(ctx, "/applicants", c.getHttpRequestOptions(params, nil)...)
 		if err != nil {
 			return err
 		}
@@ -209,7 +217,7 @@ func (c *Client) DeleteApplicant(ctx context.Context, applicantId string) error 
 	}
 
 	req := func() error {
-		resp, err := c.client.Delete(ctx, "/applicants/"+applicantId, c.getHttpRequestOptions())
+		resp, err := c.client.Delete(ctx, "/applicants/"+applicantId, c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}
@@ -231,7 +239,7 @@ func (c *Client) RestoreApplicant(ctx context.Context, applicantId string) error
 	}
 
 	req := func() error {
-		resp, err := c.client.Post(ctx, "/applicants/"+applicantId+"/restore", nil, c.getHttpRequestOptions())
+		resp, err := c.client.Post(ctx, "/applicants/"+applicantId+"/restore", nil, c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}

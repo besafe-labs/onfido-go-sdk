@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -103,20 +102,62 @@ func WithHttpRetries(retries int, wait time.Duration) RequestOption {
 	}
 }
 
+func WithRequestHttpHeaders(headers http.Header) RequestOption {
+	return func(o *requestOptions) {
+		if o.headers == nil {
+			o.headers = make(http.Header)
+		}
+		for k, v := range headers {
+			o.headers[k] = v
+		}
+	}
+}
+
+type isHttpBody interface {
+	isHttpBody()
+}
+
+type MultipartBody struct {
+	*multipart.Writer
+
+	body *bytes.Buffer
+}
+
+func NewMultipartBody() *MultipartBody {
+	var buf bytes.Buffer
+	return &MultipartBody{multipart.NewWriter(&buf), &buf}
+}
+
+func (MultipartBody) isHttpBody() {}
+
+type UrlEncodedBody struct {
+	url.Values
+}
+
+func NewUrlEncodedBody() *UrlEncodedBody {
+	return &UrlEncodedBody{url.Values{}}
+}
+
+func (UrlEncodedBody) isHttpBody() {}
+
+type JsonBody map[string]interface{}
+
+func (JsonBody) isHttpBody() {}
+
 // Request methods
 func (c *HttpClient) Get(ctx context.Context, path string, opts ...RequestOption) (*HttpResponse, error) {
 	return c.doRequest(ctx, http.MethodGet, path, nil, opts...)
 }
 
-func (c *HttpClient) Post(ctx context.Context, path string, body interface{}, opts ...RequestOption) (*HttpResponse, error) {
+func (c *HttpClient) Post(ctx context.Context, path string, body isHttpBody, opts ...RequestOption) (*HttpResponse, error) {
 	return c.doRequest(ctx, http.MethodPost, path, body, opts...)
 }
 
-func (c *HttpClient) Put(ctx context.Context, path string, body interface{}, opts ...RequestOption) (*HttpResponse, error) {
+func (c *HttpClient) Put(ctx context.Context, path string, body isHttpBody, opts ...RequestOption) (*HttpResponse, error) {
 	return c.doRequest(ctx, http.MethodPut, path, body, opts...)
 }
 
-func (c *HttpClient) Patch(ctx context.Context, path string, body interface{}, opts ...RequestOption) (*HttpResponse, error) {
+func (c *HttpClient) Patch(ctx context.Context, path string, body isHttpBody, opts ...RequestOption) (*HttpResponse, error) {
 	return c.doRequest(ctx, http.MethodPatch, path, body, opts...)
 }
 
@@ -131,7 +172,7 @@ func (c *HttpClient) Close() {
 	c.client.CloseIdleConnections()
 }
 
-func (c *HttpClient) doRequest(ctx context.Context, method, path string, body interface{}, opts ...RequestOption) (*HttpResponse, error) {
+func (c *HttpClient) doRequest(ctx context.Context, method, path string, body isHttpBody, opts ...RequestOption) (*HttpResponse, error) {
 	options := &requestOptions{
 		headers: make(http.Header),
 	}
@@ -157,15 +198,14 @@ func (c *HttpClient) doRequest(ctx context.Context, method, path string, body in
 	var reqBody io.Reader
 	if body != nil {
 		switch v := body.(type) {
-		case *multipart.Form:
+		case *MultipartBody:
 			// Handle multipart form data
-			formBody, contentType, err := c.createMultipartBodyFromForm(v)
-			if err != nil {
-				return nil, err
+			if err := v.Close(); err != nil {
+				return nil, fmt.Errorf("failed to close multipart writer: %w", err)
 			}
-			reqBody = formBody
-			options.headers.Set("Content-Type", contentType)
-		case url.Values:
+			reqBody = v.body
+			options.headers.Set("Content-Type", v.FormDataContentType())
+		case *UrlEncodedBody:
 			// Handle URL-encoded form data
 			reqBody = strings.NewReader(v.Encode())
 			options.headers.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -247,47 +287,6 @@ func (c *HttpClient) doRequest(ctx context.Context, method, path string, body in
 	}
 
 	return response, nil
-}
-
-func (c *HttpClient) createMultipartBodyFromForm(form *multipart.Form) (io.Reader, string, error) {
-	var b bytes.Buffer
-	writer := multipart.NewWriter(&b)
-
-	// Handle form fields
-	for field, values := range form.Value {
-		for _, value := range values {
-			if err := writer.WriteField(field, value); err != nil {
-				return nil, "", fmt.Errorf("failed to write form field: %w", err)
-			}
-		}
-	}
-
-	// Handle files
-	for field, files := range form.File {
-		for _, file := range files {
-			part, err := writer.CreateFormFile(field, filepath.Base(file.Filename))
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to create form file: %w", err)
-			}
-
-			content, err := file.Open()
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to open file: %w", err)
-			}
-
-			_, err = io.Copy(part, content)
-			content.Close()
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to copy file content: %w", err)
-			}
-		}
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, "", fmt.Errorf("failed to close multipart writer: %w", err)
-	}
-
-	return &b, writer.FormDataContentType(), nil
 }
 
 type HttpResponse struct {

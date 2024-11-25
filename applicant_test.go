@@ -64,6 +64,9 @@ func testCreateApplicant(run *testRun, setTestApplicant *onfido.Applicant) func(
 					assert.Containsf(t, err.Error(), tt.errMsg, errorContains, tt.errMsg, err.Error())
 					return
 				}
+				if err != nil {
+					t.Fatalf("error creating applicant: %v", err)
+				}
 
 				// Set the test applicant for later tests
 				*setTestApplicant = *applicant

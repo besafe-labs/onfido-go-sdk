@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/besafe-labs/onfido-go-sdk/internal/httpclient"
 )
 
 // ------------------------------------------------------------------
@@ -141,7 +139,12 @@ func (c *Client) CreateWorkflowRun(ctx context.Context, payload CreateWorkflowRu
 	var workflowRun WorkflowRun
 
 	req := func() error {
-		resp, err := c.client.Post(ctx, "/workflow_runs", payload)
+		body, err := c.buildJSON(payload)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.client.Post(ctx, "/workflow_runs", body)
 		if err != nil {
 			return err
 		}
@@ -165,7 +168,7 @@ func (c *Client) RetrieveWorkflowRun(ctx context.Context, workflowRunID string) 
 	var workflowRun WorkflowRun
 
 	req := func() error {
-		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID, c.getHttpRequestOptions())
+		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID, c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}
@@ -188,7 +191,7 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, opts ...IsListWorkflowRun
 	req := func() error {
 		params := c.getListWorkflowRunParams(opts...)
 
-		resp, err := c.client.Get(ctx, "/workflow_runs", httpclient.WithHttpQueryParams(params), c.getHttpRequestOptions())
+		resp, err := c.client.Get(ctx, "/workflow_runs", c.getHttpRequestOptions(params, nil)...)
 		if err != nil {
 			return err
 		}
@@ -217,7 +220,7 @@ func (c *Client) RetrieveWorkflowRunEvidenceSummaryFile(ctx context.Context, wor
 	var evidenceSummary WorkflowRunEvidenceSummary
 
 	req := func() error {
-		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID+"/signed_evidence_file", c.getHttpRequestOptions())
+		resp, err := c.client.Get(ctx, "/workflow_runs/"+workflowRunID+"/signed_evidence_file", c.getHttpRequestOptions(nil, nil)...)
 		if err != nil {
 			return err
 		}

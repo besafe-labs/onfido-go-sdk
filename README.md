@@ -10,7 +10,7 @@ An unofficial Go SDK for interacting with the Onfido API. This SDK was created b
 ## Installation
 
 ```bash
-go get github.com/besafe-labs/onfido-go-sdk
+go get -u github.com/besafe-labs/onfido-go-sdk
 ```
 
 ## Usage
@@ -60,19 +60,15 @@ func main() {
 
 ### Applicants
 
-- Create applicant
-- Retrieve applicant
-- List applicants
-- Update applicant
-- Delete applicant
-- Restore deleted applicant
+- All endpoints related to applicants
 
 ### Workflow Runs
 
-- Create workflow run
-- Retrieve workflow run
-- List workflow runs
-- Retrieve workflow run evidence summary file
+- All endpoints related to workflow runs
+
+### Documents
+
+- All endpoints related to documents
 
 ## Features
 

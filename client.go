@@ -1,9 +1,16 @@
 package onfido
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"net/textproto"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -81,8 +88,102 @@ func (c *Client) do(ctx context.Context, req func() error) error {
 	}
 }
 
-func (c Client) getHttpRequestOptions() httpclient.RequestOption {
-	return httpclient.WithHttpRetries(c.Retries, c.RetryWait)
+func (c Client) buildJSON(payload interface{}) (httpclient.JsonBody, error) {
+	if payload == nil {
+		return nil, errors.New("payload is required")
+	}
+
+	pb, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	var jsonBody httpclient.JsonBody
+	if err := json.Unmarshal(pb, &jsonBody); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
+
+	return jsonBody, nil
+}
+
+type isMultipartPayload interface {
+	toMultipartMap() (map[string]interface{}, error)
+}
+
+func (c Client) buildMultipart(payload isMultipartPayload) (body *httpclient.MultipartBody, err error) {
+	var formValues map[string]interface{}
+	switch v := payload.(type) {
+	case UploadDocumentPayload:
+		formValues, err = v.toMultipartMap()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert payload to multipart map: %w", err)
+	}
+
+	body = httpclient.NewMultipartBody()
+
+	for key, value := range formValues {
+		switch v := value.(type) {
+		case string:
+			if err := body.WriteField(key, v); err != nil {
+				return nil, fmt.Errorf("failed to write field %s: %w", key, err)
+			}
+		case *os.File:
+			// Read the file content
+			fb, err := io.ReadAll(v)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			// Create a new MIME header because ONFIDO API doesn't accept application/octet-stream,
+			// it returns content_type spoofed error
+			h := make(textproto.MIMEHeader)
+			h.Set("Content-Disposition",
+				fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
+					escapeQuotes("file"), escapeQuotes(v.Name())))
+			h.Set("Content-Type", http.DetectContentType(fb))
+
+			// Create a new part in the multipart writer
+			fileWriter, err := body.CreatePart(h)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			if _, err := io.Copy(fileWriter, bytes.NewReader(fb)); err != nil {
+				return nil, fmt.Errorf("failed to copy file %s: %w", key, err)
+			}
+		case map[string]interface{}, []map[string]interface{}:
+			pb, err := json.Marshal(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal payload: %w", err)
+			}
+
+			if err := body.WriteField(key, string(pb)); err != nil {
+				return nil, fmt.Errorf("failed to write field %s: %w", key, err)
+			}
+		default:
+			if err := body.WriteField(key, fmt.Sprintf("%v", v)); err != nil {
+				return nil, fmt.Errorf("failed to write field %s: %w", key, err)
+			}
+		}
+	}
+
+	if err := body.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	return
+}
+
+func (c Client) getHttpRequestOptions(params map[string]string, headers http.Header) []httpclient.RequestOption {
+	opts := []httpclient.RequestOption{httpclient.WithHttpRetries(c.Retries, c.RetryWait)}
+	if params != nil {
+		opts = append(opts, httpclient.WithHttpQueryParams(params))
+	}
+	if headers != nil {
+		opts = append(opts, httpclient.WithRequestHttpHeaders(headers))
+	}
+	return opts
 }
 
 func (c Client) getResponseOrError(resp *httpclient.HttpResponse, dest interface{}) error {
@@ -289,4 +390,10 @@ func (c Client) extractPageDetails(headers http.Header) PageDetails {
 	}
 
 	return pageResponse
+}
+
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func escapeQuotes(s string) string {
+	return quoteEscaper.Replace(s)
 }

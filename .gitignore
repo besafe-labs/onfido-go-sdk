@@ -26,3 +26,7 @@ go.work
 
 # Certs folder
 certs
+
+# Internal test
+test/main.go
+test/medias/debug/
